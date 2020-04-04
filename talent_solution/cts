@@ -1,0 +1,17 @@
+#!/usr/local/opt/python/libexec/bin/python
+import sys
+from src import tenant
+from src.tenant import log_level
+
+def setup():
+    pass
+
+def destroy():
+    pass
+
+def main():
+    print (log_level)
+    print(dir())
+
+if __name__ == '__main__':
+    main()
