@@ -1,7 +1,83 @@
-#!/usr/local/opt/python/libexec/bin/python
+#!/usr/bin/env python
+from google.cloud import talent_v4beta1
+import os
 import sys
-from src import tenant
-from src.tenant import log_level
+import logging
+import src.tenant
+import argparse
+
+#General logging config
+log_level = os.environ.get('LOG_LEVEL','INFO')
+logger = logging.getLogger(__name__)
+logger.setLevel(log_level)
+logger_format = logging.Formatter('%(asctime)s %(filename)s:%(lineno)s %(levelname)-8s %(message)s','%Y-%m-%d %H:%M',)
+
+#Console Logging
+console_logger = logging.StreamHandler()
+console_logger.setLevel(log_level)
+console_logger.setFormatter(logger_format)
+logger.addHandler(console_logger)
+
+
+
+class cts_cli(object):
+
+    def __init__(self):
+        #Parse the command
+        parser = argparse.ArgumentParser(description="Cloud Talent Solution Command Line tool")
+        parser.add_argument("entity",help="CTS entity and operation. Valid entities: tenant, company, job. Valid operations")
+        # Parse only the first argument
+        args = parser.parse_args(sys.argv[1:2])
+        if not hasattr(self,args.entity):
+            print ('Unrecognized Cloud Talent entity')
+            parser.print_help()
+            exit(1)
+        self.entity = getattr(self,args.entity)()
+
+    class tenant(object):
+        def __init__(self):
+            parser = argparse.ArgumentParser(description='Perform a tenant operation.')
+            #Parse the operation
+            parser.add_argument('operation',help='tenant operation to be performed. Supported operations: create,delete')
+            args = parser.parse_args(sys.argv[2:3])
+            if not hasattr(self,args.operation):
+                print ('Unrecognized operation.')
+                parser.print_help()
+                exit(1)
+#            try:
+#                main_dir = os.path.dirname(__file__)
+#                credential_file = os.path.join(main_dir,'../res/secrets/pe-cts-poc-0bbb0b044fea.json')
+#                tenant_client = talent_v4beta1.TenantServiceClient.from_service_account_file(credential_file)
+#                if create_tenant(tenant_client,project_id,tenant_name) is None:
+#                    delete_tenant(tenant_client,project_id,tenant_name)
+#             except Exception as e:
+#                logging.exception(e)
+            getattr(self,args.operation)()
+            
+        def create(self):
+            parser = argparse.ArgumentParser(description='Arguments for the operation.')                  
+            parser.add_argument('--project_id',help='Project ID for the resource.')
+            parser.add_argument('--tenant_name',help='Unique name of the tenant.')
+            args = parser.parse_args(sys.argv[3:])
+            print(args.project_id)
+            print(args.tenant_name)
+            print ("Tenant shall be created.")
+
+        def delete(self):
+            print ("Tenant shall be created.")
+
+        
+
+ #   def tenant(self,op):  
+ #       parser = argparse.ArgumentParser(description='Arguments for the operation.')                  
+ #       parser.add_argument('--project_id',help='Project ID for the resource.')
+ #       parser.add_argument('--tenant_name',help='Unique name of the tenant.')
+ #       args = parser.parse_args(sys.argv[3:])
+ #       print(op)
+ #       print(getattr(self,args.project_id))
+ #       print(getattr(self,args.tenant_name))
+ # 
+
 
 def setup():
     pass
@@ -10,8 +86,11 @@ def destroy():
     pass
 
 def main():
-    print (log_level)
-    print(dir())
+    cts_cli()
+    
 
 if __name__ == '__main__':
     main()
+else:
+    print ("This wrapper script is not to be imported. This should be run as a command line.")
+    exit(1)
