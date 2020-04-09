@@ -16,6 +16,22 @@ console_logger.setLevel(log_level)
 console_logger.setFormatter(logger_format)
 logger.addHandler(console_logger)
 
+def get_all_tenants(tenant_client,project_id):
+    """ Get a CTS tenant name by external name.
+    Args:
+        talent_client: an instance of TalentServiceClient()
+        project_id: project where the tenant will be created - string
+        tenant_name: unique ID of the tenant - string
+    Returns:
+        an instance of Tenant or None if tenant was not found.
+    """
+    try:
+        parent = tenant_client.project_path(project_id)
+        tenants = tenant_client.list_tenants(parent)
+        return tenants
+    except:
+        raise Exception("Error when getting tenant by external ID.")
+
 def get_tenant_by_name(tenant_client,project_id,tenant_name):
     """ Get a CTS tenant name by external name.
     Args:
@@ -27,7 +43,7 @@ def get_tenant_by_name(tenant_client,project_id,tenant_name):
     """
     try:
         parent = tenant_client.project_path(project_id)
-        for tenant in tenant_client.list_tenants(parent):
+        for tenant in get_all_tenants(tenant_client,project_id):
             if tenant.external_id == tenant_name:
                 return tenant
     except:
@@ -79,14 +95,10 @@ def delete_tenant(tenant_client,project_id,tenant_name):
 
 def main():
 
-    project_id='pe-cts-poc'
-    tenant_name='pole-emploi-0407'
     try:
         main_dir = os.path.dirname(__file__)
         credential_file = os.path.join(main_dir,'../res/secrets/pe-cts-poc-0bbb0b044fea.json')
         tenant_client = talent_v4beta1.TenantServiceClient.from_service_account_file(credential_file)
-        if create_tenant(tenant_client,project_id,tenant_name) is None:
-            delete_tenant(tenant_client,project_id,tenant_name)
     except Exception as e:
         logging.exception(e)
 
