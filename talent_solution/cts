@@ -71,7 +71,7 @@ class cts_cli(object):
                 for tenant in tenants:
                     print (tenant)
             else:
-                print ("No tenants found.")
+                print ("No tenants found in project {}.".format(project_id))
 
 if __name__ == '__main__':
     cts_cli()
