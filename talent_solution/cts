@@ -24,54 +24,79 @@ class cts_cli(object):
 
     def __init__(self):
         #Parse the command
-        parser = argparse.ArgumentParser(description="Cloud Talent Solution Command Line tool")
-        parser.add_argument("entity",help="CTS entity and operation. Supported entities: tenant, company, job. Valid operations")
-        # Parse only the first argument
-        args = parser.parse_args(sys.argv[1:2])
-        if not hasattr(self,args.entity):
-            print ('Unrecognized Cloud Talent entity.')
-            parser.print_help()
-            exit(1)
-        self.entity = getattr(self,args.entity)()
+        main_parser = argparse.ArgumentParser(description="Cloud Talent Solution Command Line tool")
 
-    class tenant(object):
-        def __init__(self):
-            parser = argparse.ArgumentParser(description='Perform a tenant operation.')
-            #Parse the operation
-            parser.add_argument('operation',help='Tenant operation to be performed. Supported operations: create, delete, show and list.')
-            required_args = parser.add_argument_group("required arguments")
-            required_args.add_argument('--project_id',help='Project ID for the tenant.',required=True)
-            parser.add_argument('--tenant_external_id',help='Unique name of the tenant.')
-            args = parser.parse_args(sys.argv[2:])
-            if not hasattr(self,args.operation):
-                print ('Unrecognized operation.')
-                parser.print_help()
-                exit(1)
+        subparsers_main = main_parser.add_subparsers(dest="entity",help="CTS entities.")
+        parser_tenant = subparsers_main.add_parser("tenant",help="Perform operations on a CTS tenant object.")
+        parser_company = subparsers_main.add_parser("company",help="Perform operations on a CTS company object.")
+        parser_job = subparsers_main.add_parser("job",help="Perform operations on a CTS job object.")
+
+        subparsers_tenant = parser_tenant.add_subparsers(dest="operation",help="Tenant operations.")
+        parser_tenant_create = subparsers_tenant.add_parser("create",help="Create a CTS tenant.")
+        parser_tenant_create.add_argument("--project_id",help="Project id of the CTS instance.",required=True)
+        parser_tenant_create.add_argument("--external_id",help="Unique human-friendly, external name of the tenant.",required=True)
+
+        parser_tenant_delete = subparsers_tenant.add_parser("delete",help="Delete a CTS tenant.")
+        parser_tenant_delete.add_argument("--project_id",help="Project id of the CTS instance.",required=True)
+        parser_tenant_delete.add_argument("--external_id",help="Unique human-friendly, external name of the tenant.",required=True)
+
+        parser_tenant_show = subparsers_tenant.add_parser("show",help="Show details of a CTS tenant.")
+        parser_tenant_show.add_argument("--project_id",help="Project id of the CTS instance.",required=True)
+        parser_tenant_show.add_argument("--external_id",help="Unique human-friendly, external name of the tenant.",required=True)
+
+        parser_tenant_list = subparsers_tenant.add_parser("list",help="List all CTS tenants in a project.")
+        parser_tenant_list.add_argument("--project_id",help="Project id of the CTS instance.",required=True)
+
+        # Company Parser
+        subparsers_company = parser_company.add_subparsers(dest="operation",help="Company operations.")
+        parser_tenant_create = subparsers_company.add_parser("create",help="Create a CTS company.")
+        parser_tenant_create.add_argument("--project_id",help="Project id of the CTS instance.",required=True)
+        parser_tenant_create.add_argument("--external_id",help="Unique human-friendly, external name of the company.",required=True)
+
+        parser_tenant_delete = subparsers_company.add_parser("delete",help="Delete a CTS company.")
+        parser_tenant_delete.add_argument("--project_id",help="Project id of the CTS instance.",required=True)
+        parser_tenant_delete.add_argument("--external_id",help="Unique human-friendly, external name of the tenant.",required=True)
+
+        parser_tenant_show = subparsers_company.add_parser("show",help="Show details of a CTS company.")
+        parser_tenant_show.add_argument("--project_id",help="Project id of the CTS instance.",required=True)
+        parser_tenant_show.add_argument("--external_id",help="Unique human-friendly, external name of the tenant.",required=True)
+
+        parser_tenant_list = subparsers_company.add_parser("list",help="List all CTS companies in a tenant.")
+        parser_tenant_list.add_argument("--project_id",help="Project id of the CTS instance.",required=True)
+            
+
+        args = main_parser.parse_args()
+        getattr(self,args.entity)(args)
+        
+    class tenant:
+        def __init__(self,args):
             try:
                 main_dir = os.path.dirname(__file__)
                 credential_file = os.path.join(main_dir,'res/secrets/pe-cts-poc-0bbb0b044fea.json')
                 tenant_client = talent_v4beta1.TenantServiceClient.from_service_account_file(credential_file)
+                op = getattr(args,'operation')
+                getattr(self,op)(tenant_client,args)
             except Exception as e:
                 logging.exception(e)
-            getattr(self,args.operation)(tenant_client,args.project_id,args.tenant_external_id)
-            
-        def create(self,tenant_client,project_id,tenant_external_id):
-            new_tenant = src.tenant.create_tenant(tenant_client,project_id,tenant_external_id)
+                        
+        def create(self,tenant_client,args):
+            new_tenant = src.tenant.create_tenant(tenant_client,args.project_id,args.external_id)
 
-        def delete(self,tenant_client,project_id,tenant_external_id):
-            src.tenant.delete_tenant(tenant_client,project_id,tenant_external_id)
+        def delete(self,tenant_client,args):
+            src.tenant.delete_tenant(tenant_client,args.project_id,args.external_id)
 
-        def show(self,tenant_client,project_id,tenant_external_id):
-            tenant = src.tenant.get_tenant_by_name(tenant_client,project_id,tenant_external_id)
+        def show(self,tenant_client,args):
+            tenant = src.tenant.get_tenant_by_name(tenant_client,args.project_id,args.external_id)
             print ("\n{}".format(tenant)) if tenant is not None else print("Tenant {} not found.".format(tenant_external_id))
 
-        def list(self,tenant_client,project_id,tenant_external_id):
-            tenants = src.tenant.get_all_tenants(tenant_client,project_id)
-            if any(tenants):
-                for tenant in tenants:
-                    print (tenant)
+        def list(self,tenant_client,args):
+            tenants = src.tenant.get_all_tenants(tenant_client,args.project_id)
+            tenant_list = list(tenant for tenant in tenants)
+            if len(tenant_list) == 0:
+                print ("No tenants found in project {}.".format(args.project_id))
             else:
-                print ("No tenants found in project {}.".format(project_id))
+                for tenant in tenant_list:
+                    print (tenant)
 
 if __name__ == '__main__':
     cts_cli()
