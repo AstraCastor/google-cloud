@@ -2,6 +2,7 @@ from google.cloud import talent_v4beta1
 import os
 import sys
 import logging
+import argparse
 
 #General logging config
 log_level = os.environ.get('LOG_LEVEL','INFO')
@@ -27,7 +28,7 @@ def get_tenant_by_name(tenant_client,project_id,tenant_name):
     try:
         parent = tenant_client.project_path(project_id)
         for tenant in tenant_client.list_tenants(parent):
-            if tenant.name == tenant_name:
+            if tenant.external_id == tenant_name:
                 return tenant
     except:
         raise Exception("Error when getting tenant by external ID.")
@@ -51,8 +52,9 @@ def create_tenant(tenant_client,project_id,tenant_name):
         else:
             logger.error("Tenant {} exists.\n{}".format(tenant_name,existing_tenant))
             return None
-    except:
-        raise Exception ("Error creating tenant")
+    except Exception as e:
+        print("Error creating tenant {}: {}".format(tenant_name,e))
+        raise
 
 def delete_tenant(tenant_client,project_id,tenant_name):
     """ Delete a CTS tenant by external name.
@@ -71,12 +73,14 @@ def delete_tenant(tenant_client,project_id,tenant_name):
         else:
             logger.error("Tenant {} does not exist.".format(tenant_name,existing_tenant))
             return None
-    except:
+    except Exception as e:
+        print("Error deleting tenant {}: {}".format(tenant_name,e))
         raise
 
 def main():
+
     project_id='pe-cts-poc'
-    tenant_name='pole-emploi-0331'
+    tenant_name='pole-emploi-0407'
     try:
         main_dir = os.path.dirname(__file__)
         credential_file = os.path.join(main_dir,'../res/secrets/pe-cts-poc-0bbb0b044fea.json')

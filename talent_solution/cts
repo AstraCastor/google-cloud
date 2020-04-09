@@ -25,11 +25,11 @@ class cts_cli(object):
     def __init__(self):
         #Parse the command
         parser = argparse.ArgumentParser(description="Cloud Talent Solution Command Line tool")
-        parser.add_argument("entity",help="CTS entity and operation. Valid entities: tenant, company, job. Valid operations")
+        parser.add_argument("entity",help="CTS entity and operation. Supported entities: tenant, company, job. Valid operations")
         # Parse only the first argument
         args = parser.parse_args(sys.argv[1:2])
         if not hasattr(self,args.entity):
-            print ('Unrecognized Cloud Talent entity')
+            print ('Unrecognized Cloud Talent entity.')
             parser.print_help()
             exit(1)
         self.entity = getattr(self,args.entity)()
@@ -38,59 +38,43 @@ class cts_cli(object):
         def __init__(self):
             parser = argparse.ArgumentParser(description='Perform a tenant operation.')
             #Parse the operation
-            parser.add_argument('operation',help='tenant operation to be performed. Supported operations: create,delete')
-            args = parser.parse_args(sys.argv[2:3])
+            parser.add_argument('operation',help='Tenant operation to be performed. Supported operations: create, delete, show and list.')
+            required_args = parser.add_argument_group("required arguments")
+            required_args.add_argument('--project_id',help='Project ID for the tenant.',required=True)
+            parser.add_argument('--tenant_external_id',help='Unique name of the tenant.')
+            args = parser.parse_args(sys.argv[2:])
             if not hasattr(self,args.operation):
                 print ('Unrecognized operation.')
                 parser.print_help()
                 exit(1)
-#            try:
-#                main_dir = os.path.dirname(__file__)
-#                credential_file = os.path.join(main_dir,'../res/secrets/pe-cts-poc-0bbb0b044fea.json')
-#                tenant_client = talent_v4beta1.TenantServiceClient.from_service_account_file(credential_file)
-#                if create_tenant(tenant_client,project_id,tenant_name) is None:
-#                    delete_tenant(tenant_client,project_id,tenant_name)
-#             except Exception as e:
-#                logging.exception(e)
-            getattr(self,args.operation)()
+            try:
+                main_dir = os.path.dirname(__file__)
+                credential_file = os.path.join(main_dir,'res/secrets/pe-cts-poc-0bbb0b044fea.json')
+                tenant_client = talent_v4beta1.TenantServiceClient.from_service_account_file(credential_file)
+            except Exception as e:
+                logging.exception(e)
+            getattr(self,args.operation)(tenant_client,args.project_id,args.tenant_external_id)
             
-        def create(self):
-            parser = argparse.ArgumentParser(description='Arguments for the operation.')                  
-            parser.add_argument('--project_id',help='Project ID for the resource.')
-            parser.add_argument('--tenant_name',help='Unique name of the tenant.')
-            args = parser.parse_args(sys.argv[3:])
-            print(args.project_id)
-            print(args.tenant_name)
-            print ("Tenant shall be created.")
+        def create(self,tenant_client,project_id,tenant_external_id):
+            new_tenant = src.tenant.create_tenant(tenant_client,project_id,tenant_external_id)
 
-        def delete(self):
-            print ("Tenant shall be created.")
+        def delete(self,tenant_client,project_id,tenant_external_id):
+            src.tenant.delete_tenant(tenant_client,project_id,tenant_external_id)
 
-        
+        def show(self,tenant_client,project_id,tenant_external_id):
+            tenant = src.tenant.get_tenant_by_name(tenant_client,project_id,tenant_external_id)
+            print ("\n{}".format(tenant)) if tenant is not None else print("Tenant {} not found.".format(tenant_external_id))
 
- #   def tenant(self,op):  
- #       parser = argparse.ArgumentParser(description='Arguments for the operation.')                  
- #       parser.add_argument('--project_id',help='Project ID for the resource.')
- #       parser.add_argument('--tenant_name',help='Unique name of the tenant.')
- #       args = parser.parse_args(sys.argv[3:])
- #       print(op)
- #       print(getattr(self,args.project_id))
- #       print(getattr(self,args.tenant_name))
- # 
-
-
-def setup():
-    pass
-
-def destroy():
-    pass
-
-def main():
-    cts_cli()
-    
+        def list(self,tenant_client,project_id,tenant_external_id):
+            tenants = src.tenant.get_all_tenants(tenant_client,project_id)
+            if any(tenants):
+                for tenant in tenants:
+                    print (tenant)
+            else:
+                print ("No tenants found.")
 
 if __name__ == '__main__':
-    main()
+    cts_cli()
 else:
     print ("This wrapper script is not to be imported. This should be run as a command line.")
     exit(1)
