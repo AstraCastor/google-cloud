@@ -75,10 +75,10 @@ class cts_cli(object):
                 main_dir = os.path.dirname(__file__)
                 credential_file = os.path.join(main_dir,'res/secrets/pe-cts-poc-0bbb0b044fea.json')
                 tenant_client = talent_v4beta1.TenantServiceClient.from_service_account_file(credential_file)
-                db_connection = src.db.cts_db()
+                db_connection = src.db.cts_db().connection()
 
                 op = getattr(args,'operation')
-                getattr(self,op)(tenant_client,args)
+                getattr(self,op)(tenant_client,db_connection,args)
             except Exception as e:
                 logging.exception(e)
                         
@@ -92,8 +92,8 @@ class cts_cli(object):
             tenant = src.tenant.get_tenant_by_name(tenant_client,args.project_id,args.external_id)
             print ("\n{}".format(tenant)) if tenant is not None else print("Tenant {} not found.".format(tenant_external_id))
 
-        def list(self,tenant_client,args):
-            tenants = src.tenant.get_all_tenants(tenant_client,args.project_id)
+        def list(self,tenant_client,db_connection,args):
+            tenants = src.tenant.get_all_tenants(tenant_client,db_connection,args.project_id)
             tenant_list = list(tenant for tenant in tenants)
             if len(tenant_list) == 0:
                 print ("No tenants found in project {}.".format(args.project_id))

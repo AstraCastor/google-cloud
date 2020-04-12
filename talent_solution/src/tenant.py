@@ -16,7 +16,7 @@ console_logger.setLevel(log_level)
 console_logger.setFormatter(logger_format)
 logger.addHandler(console_logger)
 
-def get_all_tenants(tenant_client,project_id):
+def get_all_tenants(tenant_client,db_connection,project_id):
     """ Get a CTS tenant name by external name.
     Args:
         talent_client: an instance of TalentServiceClient()
@@ -28,11 +28,13 @@ def get_all_tenants(tenant_client,project_id):
     try:
         parent = tenant_client.project_path(project_id)
         tenants = tenant_client.list_tenants(parent)
+        tenants_from_db = db_connection.execute("SELECT * FROM tenant")
         return tenants
-    except:
-        raise Exception("Error when getting tenant by external ID.")
+    except Exception as e:
+        print("Error when getting tenant by external ID. Message: {}".format(e))
+        raise
 
-def get_tenant_by_name(tenant_client,project_id,tenant_name):
+def get_tenant_by_name(tenant_client,db_connection,project_id,tenant_name):
     """ Get a CTS tenant name by external name.
     Args:
         talent_client: an instance of TalentServiceClient()
@@ -46,10 +48,11 @@ def get_tenant_by_name(tenant_client,project_id,tenant_name):
         for tenant in get_all_tenants(tenant_client,project_id):
             if tenant.external_id == tenant_name:
                 return tenant
-    except:
-        raise Exception("Error when getting tenant by external ID.")
+    except Exception as e:
+        print("Error getting tenant by name {}. Message: {}".format(tenant_name,e))
+        raise 
 
-def create_tenant(tenant_client,project_id,tenant_name):
+def create_tenant(tenant_client,db_connection,project_id,tenant_name):
     """ Create a CTS tenant by external name.
     Args:
         project_id: project where the tenant will be created - string
