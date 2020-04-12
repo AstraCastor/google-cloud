@@ -4,6 +4,7 @@ import os
 import sys
 import logging
 import src.tenant
+import src.db
 import argparse
 
 #General logging config
@@ -18,12 +19,11 @@ console_logger.setLevel(log_level)
 console_logger.setFormatter(logger_format)
 logger.addHandler(console_logger)
 
-
-
 class cts_cli(object):
 
     def __init__(self):
         #Parse the command
+
         main_parser = argparse.ArgumentParser(description="Cloud Talent Solution Command Line tool")
 
         subparsers_main = main_parser.add_subparsers(dest="entity",help="CTS entities.")
@@ -63,24 +63,27 @@ class cts_cli(object):
 
         parser_tenant_list = subparsers_company.add_parser("list",help="List all CTS companies in a tenant.")
         parser_tenant_list.add_argument("--project_id",help="Project id of the CTS instance.",required=True)
-            
 
         args = main_parser.parse_args()
         getattr(self,args.entity)(args)
-        
+
+
+     
     class tenant:
         def __init__(self,args):
             try:
                 main_dir = os.path.dirname(__file__)
                 credential_file = os.path.join(main_dir,'res/secrets/pe-cts-poc-0bbb0b044fea.json')
                 tenant_client = talent_v4beta1.TenantServiceClient.from_service_account_file(credential_file)
+                db_connection = src.db.cts_db()
+
                 op = getattr(args,'operation')
                 getattr(self,op)(tenant_client,args)
             except Exception as e:
                 logging.exception(e)
                         
-        def create(self,tenant_client,args):
-            new_tenant = src.tenant.create_tenant(tenant_client,args.project_id,args.external_id)
+        def create(self,tenant_client,db_connection,args):
+            new_tenant = src.tenant.create_tenant(tenant_client,db_connection,args.project_id,args.external_id)
 
         def delete(self,tenant_client,args):
             src.tenant.delete_tenant(tenant_client,args.project_id,args.external_id)
@@ -97,6 +100,38 @@ class cts_cli(object):
             else:
                 for tenant in tenant_list:
                     print (tenant)
+
+    class company:
+        def __init__(self,args):
+            try:
+                main_dir = os.path.dirname(__file__)
+                credential_file = os.path.join(main_dir,'res/secrets/pe-cts-poc-0bbb0b044fea.json')
+                tenant_client = talent_v4beta1.TenantServiceClient.from_service_account_file(credential_file)
+                op = getattr(args,'operation')
+                getattr(self,op)(tenant_client,args)
+            except Exception as e:
+                logging.exception(e)
+                        
+        def create(self,company_client,args):
+            new_company = src.company.create_company(company_client,args.project_id,args.external_id)
+
+        def delete(self,company_client,args):
+            src.company.delete_company(company_client,args.project_id,args.external_id)
+
+        def show(self,company_client,args):
+            company = src.company.get_company_by_name(company_client,args.project_id,args.external_id)
+            print ("\n{}".format(company)) if company is not None else print("company {} not found.".format(company_external_id))
+
+        def list(self,company_client,args):
+            companies = src.company.get_all_companys(company_client,args.project_id)
+            company_list = list(company for company in companies)
+            if len(company_list) == 0:
+                print ("No companies found in project {}.".format(args.project_id))
+            else:
+                for company in company_list:
+                    print (company)
+
+
 
 if __name__ == '__main__':
     cts_cli()
