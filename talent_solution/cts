@@ -8,7 +8,7 @@ import src.db
 import argparse
 
 #General logging config
-log_level = os.environ.get('LOG_LEVEL','INFO')
+log_level = os.environ.get('LOG_LEVEL','DEBUG')
 logger = logging.getLogger(__name__)
 logger.setLevel(log_level)
 logger_format = logging.Formatter('%(asctime)s %(filename)s:%(lineno)s %(levelname)-8s %(message)s','%Y-%m-%d %H:%M',)
@@ -41,7 +41,7 @@ class cts_cli(object):
         parser_tenant_delete.add_argument("--external_id",help="Unique human-friendly, external name of the tenant.",required=True)
 
         parser_tenant_show = subparsers_tenant.add_parser("show",help="Show details of a CTS tenant.")
-        parser_tenant_show.add_argument("--project_id",help="Project id of the CTS instance.",required=True)
+        parser_tenant_show.add_argument("--project_id",help="Project id of the CTS instance.")
         parser_tenant_show.add_argument("--external_id",help="Unique human-friendly, external name of the tenant.",required=True)
 
         parser_tenant_list = subparsers_tenant.add_parser("list",help="List all CTS tenants in a project.")
@@ -58,7 +58,7 @@ class cts_cli(object):
         parser_tenant_delete.add_argument("--external_id",help="Unique human-friendly, external name of the tenant.",required=True)
 
         parser_tenant_show = subparsers_company.add_parser("show",help="Show details of a CTS company.")
-        parser_tenant_show.add_argument("--project_id",help="Project id of the CTS instance.",required=True)
+        parser_tenant_show.add_argument("--project_id",help="Project id of the CTS instance.")
         parser_tenant_show.add_argument("--external_id",help="Unique human-friendly, external name of the tenant.",required=True)
 
         parser_tenant_list = subparsers_company.add_parser("list",help="List all CTS companies in a tenant.")
@@ -67,71 +67,29 @@ class cts_cli(object):
         args = main_parser.parse_args()
         getattr(self,args.entity)(args)
 
-
-     
-    class tenant:
-        def __init__(self,args):
-            try:
-                main_dir = os.path.dirname(__file__)
-                credential_file = os.path.join(main_dir,'res/secrets/pe-cts-poc-0bbb0b044fea.json')
-                tenant_client = talent_v4beta1.TenantServiceClient.from_service_account_file(credential_file)
-                db_connection = src.db.cts_db().connection()
-
-                op = getattr(args,'operation')
-                getattr(self,op)(tenant_client,db_connection,args)
-            except Exception as e:
-                logging.exception(e)
-                        
-        def create(self,tenant_client,db_connection,args):
-            new_tenant = src.tenant.create_tenant(tenant_client,db_connection,args.project_id,args.external_id)
-
-        def delete(self,tenant_client,args):
-            src.tenant.delete_tenant(tenant_client,args.project_id,args.external_id)
-
-        def show(self,tenant_client,args):
-            tenant = src.tenant.get_tenant_by_name(tenant_client,args.project_id,args.external_id)
-            print ("\n{}".format(tenant)) if tenant is not None else print("Tenant {} not found.".format(tenant_external_id))
-
-        def list(self,tenant_client,db_connection,args):
-            tenants = src.tenant.get_all_tenants(tenant_client,db_connection,args.project_id)
-            tenant_list = list(tenant for tenant in tenants)
-            if len(tenant_list) == 0:
+    def tenant(self,args):
+        try:
+            # main_dir = os.path.dirname(__file__)
+            # credential_file = os.path.join(main_dir,'res/secrets/pe-cts-poc-0bbb0b044fea.json')
+            # tenant_client = talent_v4beta1.TenantServiceClient.from_service_account_file(credential_file)
+            tenant = src.tenant.Tenant()
+        except Exception as e:
+            logging.exception(e)
+        
+        if args.operation == 'create':
+            new_tenant = tenant.create_tenant(args.external_id,args.project_id)
+        elif args.operation == 'delete':
+            tenant.delete_tenant(args.external_id,args.project_id)
+        elif args.operation == 'show':
+            existing_tenant = tenant.get_tenant_by_external_id(args.external_id,args.project_id)
+            print ("\n{}".format(existing_tenant)) if existing_tenant is not None else print("Tenant {} not found.".format(args.external_id))
+        elif args.operation == 'list':
+            tenants = tenant.get_all_tenants(args.project_id)
+            if len(tenants) == 0:
                 print ("No tenants found in project {}.".format(args.project_id))
             else:
-                for tenant in tenant_list:
+                for tenant in tenants:
                     print (tenant)
-
-    class company:
-        def __init__(self,args):
-            try:
-                main_dir = os.path.dirname(__file__)
-                credential_file = os.path.join(main_dir,'res/secrets/pe-cts-poc-0bbb0b044fea.json')
-                tenant_client = talent_v4beta1.TenantServiceClient.from_service_account_file(credential_file)
-                op = getattr(args,'operation')
-                getattr(self,op)(tenant_client,args)
-            except Exception as e:
-                logging.exception(e)
-                        
-        def create(self,company_client,args):
-            new_company = src.company.create_company(company_client,args.project_id,args.external_id)
-
-        def delete(self,company_client,args):
-            src.company.delete_company(company_client,args.project_id,args.external_id)
-
-        def show(self,company_client,args):
-            company = src.company.get_company_by_name(company_client,args.project_id,args.external_id)
-            print ("\n{}".format(company)) if company is not None else print("company {} not found.".format(company_external_id))
-
-        def list(self,company_client,args):
-            companies = src.company.get_all_companys(company_client,args.project_id)
-            company_list = list(company for company in companies)
-            if len(company_list) == 0:
-                print ("No companies found in project {}.".format(args.project_id))
-            else:
-                for company in company_list:
-                    print (company)
-
-
 
 if __name__ == '__main__':
     cts_cli()
