@@ -54,7 +54,7 @@ class cts_db():
 
             for table in sql_create_table:
                 cursor.execute(sql_create_table[table])
-                logger.info("Table {} is available.".format(table))
+                logger.debug("Table {} is available.".format(table))
         except Exception as e:
             logger.exception("Error when creating table {}. Message: {}".format(table,e))
 
