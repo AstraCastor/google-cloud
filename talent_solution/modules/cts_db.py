@@ -15,7 +15,7 @@ console_logger.setLevel(log_level)
 console_logger.setFormatter(logger_format)
 logger.addHandler(console_logger)
 
-class cts_db():
+class DB():
 
     def __init__(self):
         try:

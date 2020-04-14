@@ -4,7 +4,7 @@ import sys
 import logging
 import argparse
 from datetime import datetime
-import src.db
+from . import cts_db
 
 #General logging config
 log_level = os.environ.get('LOG_LEVEL','INFO')
@@ -28,7 +28,7 @@ class Tenant:
             logger.debug("credentials: {}".format(credential_file))
             self._tenant_client = talent_v4beta1.TenantServiceClient.from_service_account_file(credential_file)
             logger.debug("Tenant client created: {}".format(self._tenant_client))
-            self._db_connection = src.db.cts_db().connection()
+            self._db_connection = cts_db.DB().connection()
             logger.debug("Tenant db connection obtained: {}".format(self._db_connection))
         except Exception as e:
             logging.exception("Error instantiating Tenant. Message: {}".format(e))
