@@ -51,21 +51,29 @@ class cts_cli:
 
         # Company Parser
         subparsers_company = parser_company.add_subparsers(dest="operation",help="Company operations.")
-        parser_tenant_create = subparsers_company.add_parser("create",help="Create a CTS company.")
-        parser_tenant_create.add_argument("--project_id",help="Project id of the CTS instance.",required=True)
-        parser_tenant_create.add_argument("--external_id",help="Unique human-friendly, external name of the company.",required=True)
+        parser_company_create = subparsers_company.add_parser("create",help="Create a CTS company.")
+        parser_company_create.add_argument("--project_id",help="Project id of the CTS instance.",required=True)
+        parser_company_create.add_argument("--tenant_id",help="Unique human-friendly, external id of the tenant. If not provided, this will be created under default tenant.")
+        company_create_mutex_args = parser_company_create.add_mutually_exclusive_group(required=True)
+        company_create_mutex_args.add_argument("--company",help="Company object. Mandatory attributes: {\"external_id\":\"<external id>\"}")
+        company_create_mutex_args.add_argument("--file",help="Path to the file to be loaded in batch mode.")
 
-        parser_tenant_delete = subparsers_company.add_parser("delete",help="Delete a CTS company.")
-        parser_tenant_delete.add_argument("--project_id",help="Project id of the CTS instance.",required=True)
-        parser_tenant_delete.add_argument("--external_id",help="Unique human-friendly, external name of the tenant.",required=True)
-        parser_tenant_delete.add_argument("--forced",help="Force a check on the cloud and delete the tenant. Use this if the client and the cloud are out of sync.")
+        parser_company_delete = subparsers_company.add_parser("delete",help="Delete a CTS company.")
+        parser_company_delete.add_argument("--project_id",help="Project id of the CTS instance.",required=True)
+        parser_company_delete.add_argument("--tenant_id",help="Unique human-friendly, external id of the tenant. If not provided, this will be created under default tenant.")
+        company_delete_mutex_args = parser_company_delete.add_mutually_exclusive_group(required=True)
+        company_delete_mutex_args.add_argument("--external_id",help="Unique human-friendly, external name of the company.")
+        company_delete_mutex_args.add_argument("--all",help="Unique human-friendly, external name of the tenant.",action='store_true')
+        parser_company_delete.add_argument("--forced",help="Force a check on the cloud and delete the tenant. Use this if the client and the cloud are out of sync.",action='store_true')
 
-        parser_tenant_show = subparsers_company.add_parser("show",help="Show details of a CTS company.")
-        parser_tenant_show.add_argument("--project_id",help="Project id of the CTS instance.")
-        parser_tenant_show.add_argument("--external_id",help="Unique human-friendly, external name of the tenant.",required=True)
+        parser_company_show = subparsers_company.add_parser("show",help="Show details of a CTS company.")
+        parser_company_show.add_argument("--project_id",help="Project id of the CTS instance.",required=True)
+        parser_company_show.add_argument("--tenant_id",help="Unique human-friendly, external id of the tenant. If not provided, this will be created under default tenant.")
+        parser_company_show.add_argument("--external_id",help="Unique human-friendly, external name of the tenant.",required=True)
 
-        parser_tenant_list = subparsers_company.add_parser("list",help="List all CTS companies in a tenant.")
-        parser_tenant_list.add_argument("--project_id",help="Project id of the CTS instance.",required=True)
+        parser_company_list = subparsers_company.add_parser("list",help="List all CTS companies in a tenant.")
+        parser_company_list.add_argument("--project_id",help="Project id of the CTS instance.",required=True)
+        parser_company_list.add_argument("--tenant_id",help="Unique human-friendly, external id of the tenant.")
 
         args = main_parser.parse_args()
         getattr(self,args.entity)(args)
@@ -77,12 +85,11 @@ class cts_cli:
             logging.exception(e)
         
         if args.operation == 'create':
-            new_tenant = tenant.create_tenant(args.external_id,args.project_id)
+            new_tenant = tenant.create_tenant(args.project_id,args.external_id)
         elif args.operation == 'delete':
-            tenant.delete_tenant(args.external_id,args.project_id,args.forced)
+            tenant.delete_tenant(args.project_id,args.external_id,args.forced)
         elif args.operation == 'show':
-            # existing_tenant = tenant.get_tenant_by_external_id(args.external_id,args.project_id)
-            existing_tenant = tenant.get_tenant(external_id=args.external_id,project_id=args.project_id)
+            existing_tenant = tenant.get_tenant(project_id=args.project_id,external_id=args.external_id)
             print ("\n{}".format(existing_tenant)) if existing_tenant is not None else print("Tenant {} not found.".format(args.external_id))
         elif args.operation == 'list':
             tenants = tenant.get_tenant(project_id=args.project_id,all=True)
@@ -99,14 +106,14 @@ class cts_cli:
             logging.exception(e)
         
         if args.operation == 'create':
-            new_company = company.create_company(args.external_id,args.project_id)
+            new_company = company.create_company(args.tenant_id,args.project_id,args.company,args.batch,args.file)
         elif args.operation == 'delete':
-            company.delete_company(args.external_id,args.project_id,args.forced)
+            company.delete_company(args.project_id,args.tenant_id,args.external_id,args.all,args.forced)
         elif args.operation == 'show':
-            existing_company = company.get_company(external_id=args.external_id,project_id=args.project_id)
+            existing_company = company.get_company(project_id=args.project_id,tenant_id=args.tenant_id,external_id=args.external_id)
             print ("\n{}".format(existing_company)) if existing_company is not None else print("company {} not found.".format(args.external_id))
         elif args.operation == 'list':
-            companies = company.get_company(project_id=args.project_id,all=True)
+            companies = company.get_company(project_id=args.project_id,tenant_id=args.tenant_id,all=True)
             if len(companies) == 0:
                 print ("No companies found in project {}.".format(args.project_id))
             else:

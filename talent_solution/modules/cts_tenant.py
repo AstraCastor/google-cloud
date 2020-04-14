@@ -37,7 +37,7 @@ class Tenant:
     def client(self):
         return self._tenant_client
 
-    def get_tenant(self,external_id=None,project_id=None,all=False):
+    def get_tenant(self,project_id=None,external_id=None,all=False):
         """ Get CTS tenant by name or get all CTS tenants by project.
         Args:
             talent_client: an instance of TalentServiceClient()
@@ -74,7 +74,7 @@ class Tenant:
             logger.error("Error getting tenant by name {}. Message: {}".format(external_id,e))
             raise        
 
-    def create_tenant(self,external_id,project_id):
+    def create_tenant(self,project_id,external_id):
         """ Create a CTS tenant by external name.
         Args:
             project_id: project where the tenant will be created - string
@@ -102,7 +102,7 @@ class Tenant:
             self.delete_tenant(external_id,project_id)
             raise
 
-    def delete_tenant(self,external_id,project_id,forced=False):
+    def delete_tenant(self,project_id,external_id,forced=False):
         """ Delete a CTS tenant by external name.
         Args:
             project_id: project where the tenant will be created - string
