@@ -8,7 +8,7 @@ import src.db
 import argparse
 
 #General logging config
-log_level = os.environ.get('LOG_LEVEL','DEBUG')
+log_level = os.environ.get('LOG_LEVEL','INFO')
 logger = logging.getLogger(__name__)
 logger.setLevel(log_level)
 logger_format = logging.Formatter('%(asctime)s %(filename)s:%(lineno)s %(levelname)-8s %(message)s','%Y-%m-%d %H:%M',)
@@ -18,8 +18,10 @@ console_logger = logging.StreamHandler()
 console_logger.setLevel(log_level)
 console_logger.setFormatter(logger_format)
 logger.addHandler(console_logger)
+logger.info("Setting log level to {}".format(log_level))
 
-class cts_cli(object):
+
+class cts_cli:
 
     def __init__(self):
         #Parse the command
@@ -39,6 +41,7 @@ class cts_cli(object):
         parser_tenant_delete = subparsers_tenant.add_parser("delete",help="Delete a CTS tenant.")
         parser_tenant_delete.add_argument("--project_id",help="Project id of the CTS instance.",required=True)
         parser_tenant_delete.add_argument("--external_id",help="Unique human-friendly, external name of the tenant.",required=True)
+        parser_tenant_delete.add_argument("--forced",help="Force a check on the cloud and delete the tenant. Use this if the client and the cloud are out of sync.",action='store_true')
 
         parser_tenant_show = subparsers_tenant.add_parser("show",help="Show details of a CTS tenant.")
         parser_tenant_show.add_argument("--project_id",help="Project id of the CTS instance.")
@@ -56,6 +59,7 @@ class cts_cli(object):
         parser_tenant_delete = subparsers_company.add_parser("delete",help="Delete a CTS company.")
         parser_tenant_delete.add_argument("--project_id",help="Project id of the CTS instance.",required=True)
         parser_tenant_delete.add_argument("--external_id",help="Unique human-friendly, external name of the tenant.",required=True)
+        parser_tenant_delete.add_argument("--forced",help="Force a check on the cloud and delete the tenant. Use this if the client and the cloud are out of sync.")
 
         parser_tenant_show = subparsers_company.add_parser("show",help="Show details of a CTS company.")
         parser_tenant_show.add_argument("--project_id",help="Project id of the CTS instance.")
@@ -79,12 +83,13 @@ class cts_cli(object):
         if args.operation == 'create':
             new_tenant = tenant.create_tenant(args.external_id,args.project_id)
         elif args.operation == 'delete':
-            tenant.delete_tenant(args.external_id,args.project_id)
+            tenant.delete_tenant(args.external_id,args.project_id,args.forced)
         elif args.operation == 'show':
-            existing_tenant = tenant.get_tenant_by_external_id(args.external_id,args.project_id)
+            # existing_tenant = tenant.get_tenant_by_external_id(args.external_id,args.project_id)
+            existing_tenant = tenant.get_tenant(external_id=args.external_id,project_id=args.project_id)
             print ("\n{}".format(existing_tenant)) if existing_tenant is not None else print("Tenant {} not found.".format(args.external_id))
         elif args.operation == 'list':
-            tenants = tenant.get_all_tenants(args.project_id)
+            tenants = tenant.get_tenant(project_id=args.project_id,all=True)
             if len(tenants) == 0:
                 print ("No tenants found in project {}.".format(args.project_id))
             else:
