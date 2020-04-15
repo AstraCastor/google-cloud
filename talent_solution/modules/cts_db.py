@@ -21,7 +21,7 @@ class DB():
         try:
             __connection = sqlite3.connect("./res/cts.db",isolation_level=None)
             self.__cursor = __connection.cursor()
-            logger.info("CTS Database connected.")
+            logger.debug("CTS Database connected.")
             self.setup_cts_schema(self.__cursor)
         except ConnectionError as e:
             logger.exception("Error when opening DB connection. Message:{}".format(e))
@@ -39,18 +39,23 @@ class DB():
                                             sync_time INTEGER)"
 
             sql_create_table['tenant'] = "CREATE TABLE IF NOT EXISTS tenant (  \
-                                        external_id TEXT PRIMARY KEY,   \
+                                        tenant_key TEXT PRIMARY KEY,     \
                                         tenant_name TEXT NOT NULL,   \
+                                        external_id TEXT,   \
                                         project_id TEXT NOT NULL,    \
                                         suspended INTEGER,  \
-                                        create_time INTEGER)"
+                                        create_time INTEGER \
+                                        )"
 
             sql_create_table['company'] = "CREATE TABLE IF NOT EXISTS company (  \
-                                        external_id TEXT PRIMARY KEY,   \
+                                        company_key TEXT PRIMARY KEY, \
+                                        external_id TEXT NOT NULL,   \
                                         company_name TEXT,   \
+                                        tenant_name TEXT, \
                                         project_id TEXT NOT NULL,    \
                                         suspended INTEGER,  \
-                                        create_time INTEGER)"
+                                        create_time INTEGER    \
+                                        )"
 
             for table in sql_create_table:
                 cursor.execute(sql_create_table[table])

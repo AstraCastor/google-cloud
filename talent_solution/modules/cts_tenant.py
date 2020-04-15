@@ -37,7 +37,7 @@ class Tenant:
     def client(self):
         return self._tenant_client
 
-    def get_tenant(self,project_id=None,external_id=None,all=False):
+    def get_tenant(self,project_id,external_id=None,all=False):
         """ Get CTS tenant by name or get all CTS tenants by project.
         Args:
             talent_client: an instance of TalentServiceClient()
@@ -55,16 +55,12 @@ class Tenant:
                     logging.exception("Conflicting arguments: --external_id and --all are mutually exclusive.")
                     raise ValueError
                 elif project_id is not None:
-                    db.execute("SELECT external_id,tenant_name,project_id FROM tenant where external_id = \'{}\' and project_id=\'{}\'"    \
-                    .format(external_id,project_id))
-                else:
-                    db.execute("SELECT external_id,tenant_name,project_id FROM tenant where external_id = \'{}\'".format(external_id))
+                    db.execute("SELECT external_id,tenant_name,project_id FROM tenant where tenant_key = '{}'".format(project_id+"-"+external_id))
                 rows = db.fetchall()
                 if rows == []:
                     return None
                 else:
                     logger.debug("db lookup:{}".format(rows))
-                    parent = client.project_path(rows[0][2])
                     tenant = client.get_tenant(rows[0][1])
             elif all:
                 parent = client.project_path(project_id)
@@ -85,13 +81,13 @@ class Tenant:
         db = self._db_connection
         client = self._tenant_client
         try:
-            existing_tenant = self.get_tenant(external_id=external_id)
+            existing_tenant = self.get_tenant(project_id=project_id,external_id=external_id)
             if existing_tenant is None:
                 parent = client.project_path(project_id)
                 tenant_object = {'external_id':external_id}
                 new_tenant = client.create_tenant(parent,tenant_object)
-                logger.debug("Query:INSERT INTO tenant (external_id,tenant_name,project_id,suspended,create_time) VALUES ({},{},{:d},{})".format(new_tenant.external_id,new_tenant.name,1,datetime.now()))
-                db.execute("INSERT INTO tenant (external_id,tenant_name,project_id,suspended,create_time) VALUES ('{}','{}','{}',{:d},'{}')".format(new_tenant.external_id,new_tenant.name,project_id,1,datetime.now()))
+                logger.debug("Query:INSERT INTO tenant (tenant_key,external_id,tenant_name,project_id,suspended,create_time) VALUES ('{}','{}','{}','{}','{:d}','{}')".format(project_id+"-"+external_id,new_tenant.external_id,new_tenant.name,project_id,1,datetime.now()))
+                db.execute("INSERT INTO tenant (tenant_key,external_id,tenant_name,project_id,suspended,create_time) VALUES ('{}','{}','{}','{}',{:d},'{}')".format(project_id+"-"+external_id,new_tenant.external_id,new_tenant.name,project_id,1,datetime.now()))
                 logger.info("Tenant {} created.\n{}".format(external_id,new_tenant))
                 return new_tenant
             else:
@@ -99,7 +95,7 @@ class Tenant:
                 return None
         except Exception as e:
             print("Error creating tenant {}: {}".format(external_id,e))
-            self.delete_tenant(external_id,project_id)
+            self.delete_tenant(project_id,external_id,forced=True)
             raise
 
     def delete_tenant(self,project_id,external_id,forced=False):
@@ -122,7 +118,7 @@ class Tenant:
                     else:
                         existing_tenant = None
             else:
-                existing_tenant = self.get_tenant(external_id=external_id,project_id=project_id)
+                existing_tenant = self.get_tenant(project_id=project_id,external_id=external_id)
                 logger.debug("Existing Tenant? {}".format(existing_tenant))
             if existing_tenant is not None:
                 logger.info("Deleting tenant name: {}".format(existing_tenant.external_id))
