@@ -4,6 +4,7 @@ import os
 import sys
 import logging
 import argparse
+from json import loads as json_loads
 from modules import cts_tenant,cts_company
 
 #General logging config
@@ -55,7 +56,7 @@ class cts_cli:
         parser_company_create.add_argument("--project_id",help="Project id of the CTS instance.",required=True)
         parser_company_create.add_argument("--tenant_id",help="Unique human-friendly, external id of the tenant. If not provided, this will be created under default tenant.")
         company_create_mutex_args = parser_company_create.add_mutually_exclusive_group(required=True)
-        company_create_mutex_args.add_argument("--company",help="Company object. Mandatory attributes: {\"external_id\":\"<external id>\"}")
+        company_create_mutex_args.add_argument("--company",help="Company object. Mandatory attributes: {\"external_id\":\"<external id>\"}",type=json_loads)
         company_create_mutex_args.add_argument("--file",help="Path to the file to be loaded in batch mode.")
 
         parser_company_delete = subparsers_company.add_parser("delete",help="Delete a CTS company.")
@@ -106,9 +107,9 @@ class cts_cli:
             logging.exception(e)
         
         if args.operation == 'create':
-            new_company = company.create_company(args.tenant_id,args.project_id,args.company,args.batch,args.file)
+            new_company = company.create_company(project_id=args.project_id,tenant_id=args.tenant_id,company_object=args.company,file=args.file)
         elif args.operation == 'delete':
-            company.delete_company(args.project_id,args.tenant_id,args.external_id,args.all,args.forced)
+            company.delete_company(project_id=args.project_id,tenant_id=args.tenant_id,external_id=args.external_id,all=args.all,forced=args.forced)
         elif args.operation == 'show':
             existing_company = company.get_company(project_id=args.project_id,tenant_id=args.tenant_id,external_id=args.external_id)
             print ("\n{}".format(existing_company)) if existing_company is not None else print("company {} not found."  \

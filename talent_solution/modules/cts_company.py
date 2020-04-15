@@ -1,8 +1,5 @@
-from google.cloud import talent_v4beta1
-import os
-import sys
-import logging
-import argparse
+from google.cloud import talent_v4beta1,storage
+import os,sys,logging,argparse
 from datetime import datetime
 from . import cts_db,cts_tenant
 
@@ -31,11 +28,86 @@ class Company:
         except Exception as e:
             logging.exception("Error instantiating Company. Message: {}".format(e))
 
-    def create_company(self,tenant_id=None,project_id=None,company=None,file=None):
-        pass
+    def create_company(self,project_id,tenant_id=None,company_object=None,file=None):
+        db = self._db_connection
+        client = self._company_client
+        try:
+            logger.debug("Company input: Type {}\n{}".format(type(company_object),company_object))
+            if isinstance(company_object,dict):
+                external_id = company_object['external_id']
+                # Check if it is an existing company
+                existing_company = self.get_company(project_id=project_id,external_id=external_id)
+                if existing_company is None:
+                    if tenant_id is not None:
+                        # To set the parent of the company to be created to the tenant_name 
+                        # for the given tenant_id(tenant external_id)
+                        tenant = cts_tenant.Tenant()
+                        tenant_obj = tenant.get_tenant(project_id,tenant_id)
+                        logger.debug("Tenant retrieved:\n{}".format(tenant_obj))
+                        if tenant_obj is None:
+                            logging.error("Unknown Tenant: {}".format(tenant_id))
+                            exit(1)
+                        parent = tenant_obj.name
+                    else:
+                        parent = client.project_path(project_id)
+                    logger.debug("Parent path set to: {}".format(parent))
+                    new_company = client.create_company(parent,company_object)
+                    query = "INSERT INTO company (company_key,external_id,company_name,tenant_name,project_id,suspended,create_time)    \
+                        VALUES ('{}','{}','{}','{}','{}','{:d}','{}')".format(project_id+"-"+external_id,new_company.external_id,    \
+                            new_company.name,tenant_obj.name,project_id,0,datetime.now())
+                    logger.debug("QUERY: {}".format(query))
+                    db.execute(query)
+                    logger.info("Company {} created.\n{}".format(external_id,new_company))
+                    return new_company
+                else:
+                    logger.error("Company {} already exists.\n{}".format(external_id,existing_company))
+                    return None
+            else:
+                logger.error("Invalid or missing company argument. Should be a valid company object.\n {}"\
+                    .format(company_object))
+                raise ValueError
+        except Exception as e:
+            print("Error creating company:\n{}\n{}".format(company_object,e))
+            self.delete_company(project_id,tenant_id,company_object['external_id'],forced=True)
+            raise
 
-    def delete_company(self,tenant_id=None,project_id=None,external_id=None,all=False,forced=False):
-        pass
+    def delete_company(self,project_id,tenant_id=None,external_id=None,all=False,forced=False):
+        """ Delete a CTS company by external name.
+        Args:
+            project_id: project where the company will be created - string
+            external_id: unique ID of the company - string
+        Returns:
+            None - If company is not found.
+        """
+        db = self._db_connection
+        client = self._company_client
+        try:
+            if forced:
+                all_companies = self.get_company(project_id=project_id,tenant_id=tenant_id,all=True)
+                logger.debug("Total companies retrieved: {}".format(len(all_companies)))
+                if len(all_companies) != 0:
+                    for company in all_companies:
+                        if company.external_id == external_id:
+                            existing_company = company
+                            break
+                        else:
+                            existing_company = None
+                else:
+                    existing_company = None
+            else:
+                existing_company = self.get_company(project_id=project_id,tenant_id=tenant_id,external_id=external_id)
+                logger.debug("Existing company? {}".format(existing_company))
+            if existing_company is not None:
+                logger.info("Deleting company id: {}".format(existing_company.external_id))
+                client.delete_company(existing_company.name)
+                db.execute("DELETE FROM company where company_name = '{}'".format(existing_company.name))
+                logger.info("Company {} deleted.".format(external_id))
+            else:
+                logger.error("Company {} does not exist.".format(external_id))
+                return None
+        except Exception as e:
+            print("Error deleting company {}: {}".format(external_id,e))
+            raise
 
     def update_company(self,tenant_id,project_id=None,company=None,file=None):
         pass
@@ -68,22 +140,16 @@ class Company:
                     company = client.get_company(rows[0][1])
             elif all:
                 if tenant_id is not None:
-                    # tenant = cts_tenant.Tenant()
-                    # tenant_obj = tenant.get_tenant(project_id,tenant_id)
-                    # logger.debug("Tenant retrieved:\n{}".format(tenant_obj))
-                    # if tenant_obj is None:
-                    #     logging.error("Unknown Tenant: {}".format(tenant_id))
-                    #     exit(1)
-                    # parent = tenant_obj.name
-                    db.execute("SELECT distinct tenant_name FROM company where company_key like '{}%'".format(project_id+"-"+tenant_id+"-"))
-                    rows = db.fetchall()
-                    if rows == []:
-                        return []
-                    else:
-                        parent = rows[0][0]
-                    logger.debug("Parent path: {}".format(parent))
+                    tenant = cts_tenant.Tenant()
+                    tenant_obj = tenant.get_tenant(project_id,tenant_id)
+                    logger.debug("Tenant retrieved:\n{}".format(tenant_obj))
+                    if tenant_obj is None:
+                        logging.error("Unknown Tenant: {}".format(tenant_id))
+                        exit(1)
+                    parent = tenant_obj.name
                 else:
                     parent = client.project_path(project_id)
+                logger.debug("Parent path: {}".format(parent))
                 company = [t for t in client.list_companies(parent)]
                 return company
             else:
