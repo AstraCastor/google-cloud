@@ -18,7 +18,8 @@ console_logger = logging.StreamHandler()
 console_logger.setLevel(log_level)
 console_logger.setFormatter(logger_format)
 logger.addHandler(console_logger)
-logger.info("Setting log level to {}".format(log_level))
+
+#TODO:Add file logging
 
 
 class cts_cli:

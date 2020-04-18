@@ -1,4 +1,4 @@
-from google.cloud import talent_v4beta1,storage
+from google.cloud import talent_v4beta1
 import os,sys,logging,argparse, inspect
 from datetime import datetime
 from . import cts_db,cts_tenant
@@ -14,6 +14,8 @@ console_logger = logging.StreamHandler()
 console_logger.setLevel(log_level)
 console_logger.setFormatter(logger_format)
 logger.addHandler(console_logger)
+
+#TODO:Add file logging
 
 class Company:
     def __init__(self):
