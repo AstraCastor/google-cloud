@@ -4,7 +4,7 @@ import sys
 import logging
 import argparse
 from datetime import datetime
-from . import cts_db
+from modules import cts_db
 
 #General logging config
 log_level = os.environ.get('LOG_LEVEL','INFO')

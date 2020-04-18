@@ -1,7 +1,7 @@
 from google.cloud import talent_v4beta1
 import os,sys,logging,argparse, inspect
 from datetime import datetime
-from . import cts_db,cts_tenant
+from modules import cts_db,cts_tenant
 
 #General logging config
 log_level = os.environ.get('LOG_LEVEL','INFO')
