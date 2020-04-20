@@ -109,11 +109,20 @@ class cts_cli:
         parser_job_show.add_argument("--project_id",help="Project id of the CTS instance.",required=True)
         parser_job_show.add_argument("--tenant_id",help="Unique human-friendly, external id of the tenant. \
             If not provided, this will be created under default tenant.")
-        parser_job_show.add_argument("--external_id",help="Unique human-friendly, external name of the tenant.",required=True)
+        parser_job_show.add_argument("--company_id",help="External id of the company.",required=True)
+        parser_job_show.add_argument("--external_id",help="Requisition ID of the job. If a language code is provided along with \
+            this, it will uniquely identify a job listing.",required=True)
+        parser_job_show.add_argument("--language",help="BCP-47 Standard language code of the job, such as “en-US” or “sr-Latn”. \
+            If a language code is provided along with the external_id, it will uniquely identify a job listing. Multiple languages \
+                can be provided as a comma separated list. Default: 'en-US'.",default='en-US')
 
         parser_job_list = subparsers_job.add_parser("list",help="List all CTS companies in a tenant.")
         parser_job_list.add_argument("--project_id",help="Project id of the CTS instance.",required=True)
         parser_job_list.add_argument("--tenant_id",help="Unique human-friendly, external id of the tenant.")
+        parser_job_list.add_argument("--company_id",help="Unique human-friendly, external id of the company.",required=True)
+        parser_job_list.add_argument("--status",help="Status of the job listing. Valid values: OPEN, EXPIRED, ALL. \
+            Default: OPEN.",choices=['OPEN','EXPIRED','ALL'],default='OPEN')
+
 
         args = main_parser.parse_args()
         getattr(self,args.entity)(args)
@@ -173,16 +182,16 @@ class cts_cli:
         elif args.operation == 'delete':
             job.delete_job(project_id=args.project_id,tenant_id=args.tenant_id,external_id=args.external_id,all=args.all,forced=args.forced)
         elif args.operation == 'show':
-            existing_job = job.get_job(project_id=args.project_id,tenant_id=args.tenant_id,external_id=args.external_id)
+            existing_job = job.get_job(project_id=args.project_id,tenant_id=args.tenant_id,company_id=args.company_id,external_id=args.external_id,languages=args.language)
             print ("\n{}".format(existing_job)) if existing_job is not None else print("job {} not found."  \
                 .format(args.external_id))
         elif args.operation == 'list':
-            companies = job.get_job(project_id=args.project_id,tenant_id=args.tenant_id,all=True)
-            if len(companies) == 0:
-                print ("No companies found in project {}.".format(args.project_id)) if args.tenant_id is None   \
-                    else print ("No companies found in project {} and tenant {}.".format(args.project_id,args.tenant_id))
+            jobs = job.get_job(project_id=args.project_id,tenant_id=args.tenant_id,company_id=args.company_id,status=args.status,all=True)
+            if len(jobs) == 0:
+                print ("No jobs found for project {} and company {}.".format(args.project_id,args.company_id)) if args.tenant_id is None   \
+                    else print ("No companies found in project {}, tenant {} and company {}.".format(args.project_id,args.tenant_id,args.company_id))
             else:
-                for job in companies:
+                for job in jobs:
                     print (job)
 
 if __name__ == '__main__':

@@ -57,6 +57,18 @@ class DB():
                                         create_time INTEGER    \
                                         )"
 
+            sql_create_table['job'] = "CREATE TABLE IF NOT EXISTS job (  \
+                                        job_key TEXT PRIMARY KEY, \
+                                        external_id TEXT NOT NULL,   \
+                                        language_code TEXT NOT NULL, \
+                                        job_name TEXT, \
+                                        company_name TEXT NOT NULL,   \
+                                        tenant_name TEXT, \
+                                        project_id TEXT NOT NULL,    \
+                                        suspended INTEGER,  \
+                                        create_time INTEGER    \
+                                        )"
+
             for table in sql_create_table:
                 cursor.execute(sql_create_table[table])
                 logger.debug("Table {} is available.".format(table))
