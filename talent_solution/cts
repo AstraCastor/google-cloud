@@ -159,9 +159,18 @@ class cts_cli:
         elif args.operation == 'delete':
             company.delete_company(project_id=args.project_id,tenant_id=args.tenant_id,external_id=args.external_id,all=args.all,forced=args.forced)
         elif args.operation == 'show':
-            existing_company = company.get_company(project_id=args.project_id,tenant_id=args.tenant_id,external_id=args.external_id)
-            print ("\n{}".format(existing_company)) if existing_company is not None else print("company {} not found."  \
-                .format(args.external_id))
+            logger.debug("Showing company(ies): {}".format(args.external_id))
+            existing_companies = company.get_company(project_id=args.project_id,tenant_id=args.tenant_id,external_id=args.external_id)
+            if existing_companies is not None:
+                for id in args.external_id.split(","):
+                    if any(existing_company.external_id == id for existing_company in existing_companies):
+                        for existing_company in existing_companies:
+                            if existing_company.external_id==id:
+                                print(existing_company)
+                    else:
+                        print("Company {} not found.".format(id))                        
+            else:
+                print(["No companies found: {}".format(args.external_id)])
         elif args.operation == 'list':
             companies = company.get_company(project_id=args.project_id,tenant_id=args.tenant_id,all=True)
             if len(companies) == 0:
