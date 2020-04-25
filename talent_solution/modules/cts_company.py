@@ -1,43 +1,42 @@
 from google.cloud import talent_v4beta1
 from google.api_core.exceptions import AlreadyExists, NotFound, GoogleAPICallError, RetryError
 
-import os,sys,logging,argparse,inspect,re
+import os
+import sys
+import logging
+import argparse
+import inspect
+import re
+import json
 from datetime import datetime
 from modules import cts_db,cts_tenant
+from res import config as config
 
-#General logging config
-log_level = os.environ.get('LOG_LEVEL','INFO')
-logger = logging.getLogger(__name__)
-logger.setLevel(log_level)
-logger_format = logging.Formatter('%(asctime)s %(filename)s:%(lineno)s %(levelname)-8s %(message)s','%Y-%m-%d %H:%M',)
-
-#Console Logging
-console_logger = logging.StreamHandler()
-console_logger.setLevel(log_level)
-console_logger.setFormatter(logger_format)
-logger.addHandler(console_logger)
-
-#TODO:Add file logging
+#Get the root logger
+logger = logging.getLogger()
 
 class Company:
-    def __init__(self):
+    def __init__(self,external_id=None,name=None):
         try:
-            main_dir = os.path.dirname(__file__)
-            credential_file = os.path.join(main_dir,'../res/secrets/pe-cts-poc-0bbb0b044fea.json')
-            logger.debug("credentials: {}".format(credential_file))
-            self._company_client = talent_v4beta1.CompanyServiceClient.from_service_account_file(credential_file)
-            logger.debug("Company client created: {}".format(self._company_client))
-            self._db_connection = cts_db.DB().connection()
-            logger.debug("Company db connection obtained: {}".format(self._db_connection))
+            self.external_id = external_id
+            self.name = name
             logging.debug("Company instantiated.")
         except Exception as e:
-            logging.exception("Error instantiating Company. Message: {}".format(e))
+            logging.error("Error instantiating Company. Message: {}".format(e),exc_info=config.LOGGING['traceback'])
+    
+    def client(self):
+        credential_file = config.APP['secret_key']
+        logger.debug("credentials: {}".format(credential_file))
+        _company_client = talent_v4beta1.CompanyServiceClient.from_service_account_file(credential_file)
+        logger.debug("Company client created: {}".format(_company_client))
+        return _company_client
+    
 
     def create_company(self,project_id,tenant_id=None,company_object=None,file=None):
-        logger.debug("CALLED: create_company({},{},{},{} by {})".format(project_id,tenant_id,company_object,file,inspect.currentframe().f_back.f_code.co_name,))
-        db = self._db_connection
-        client = self._company_client
+        logger.debug("CALLED: create_company({},{},{},{} by {})".format(project_id,tenant_id,company_object,file,inspect.currentframe().f_back.f_code.co_name))
         try:
+            db = cts_db.DB().connection
+            client = self.client()       
             logger.debug("Company input: Type {}\n{}".format(type(company_object),company_object))
             if isinstance(company_object,dict):
                 external_id = company_object['external_id']
@@ -53,7 +52,7 @@ class Company:
                         tenant_obj = tenant.get_tenant(project_id,tenant_id)
                         logger.debug("Tenant retrieved:\n{}".format(tenant_obj))
                         if tenant_obj is None:
-                            logging.error("Unknown Tenant: {}".format(tenant_id))
+                            logging.error("Unknown Tenant: {}".format(tenant_id),exc_info=config.LOGGING['traceback'])
                             exit(1)
                         parent = tenant_obj.name
                         tenant_name = tenant_obj.name
@@ -97,23 +96,26 @@ class Company:
 
                     company_key = project_id+"-"+tenant_id+"-"+external_id if tenant_id is not None else project_id+"-"+external_id
                     logger.debug("Inserting record for company key:{}".format(company_key))
-                    query = "INSERT INTO company (company_key,external_id,company_name,tenant_name,project_id,suspended,create_time)    \
+                    logger.debug("Query: INSERT INTO company (company_key,external_id,company_name,tenant_name,project_id,suspended,create_time)    \
                         VALUES ('{}','{}','{}','{}','{}','{:d}','{}')".format(company_key,new_company.external_id,    \
-                            new_company.name,tenant_name,project_id,0,datetime.now())
-                    logger.debug("QUERY: {}".format(query))
-                    db.execute(query)
+                            new_company.name,tenant_name,project_id,0,datetime.now()))
+                    db.execute("INSERT INTO company (company_key,external_id,company_name,tenant_name,project_id,suspended,create_time) \
+                        VALUES (?,?,?,?,?,?,?)",\
+                        (company_key,new_company.external_id,new_company.name,tenant_name,project_id,0,datetime.now()))
                     logger.info("Company {} created.\n{}".format(external_id,new_company))
                     print("Company {} created.\n{}".format(external_id,new_company))
                     return new_company
                 else:
-                    logger.error("{}: Company {} already exists.\n{}".format(inspect.currentframe().f_code.co_name,external_id,existing_company))
+                    logger.error("{}: Company {} already exists.\n{}".format(inspect.currentframe().f_code.co_name,external_id,\
+                        existing_company),exc_info=config.LOGGING['traceback'])
                     return None
             else:
                 logger.error("{}:Invalid or missing company argument. Should be a valid company object.\n {}"\
-                    .format(inspect.currentframe().f_code.co_name,company_object))
+                    .format(inspect.currentframe().f_code.co_name,company_object),exc_info=config.LOGGING['traceback'])
                 raise ValueError
         except Exception as e:
-            print("{}:Error creating company:\n{}\n{}".format(inspect.currentframe().f_code.co_name,company_object,e))
+            logger.error("{}:Error creating company:\n{}\n{}".format(inspect.currentframe().f_code.co_name,company_object,e),\
+                exc_info=config.LOGGING['traceback'])
             self.delete_company(project_id,tenant_id,company_object['external_id'],forced=True)
             raise
 
@@ -125,10 +127,11 @@ class Company:
         Returns:
             None - If company is not found.
         """
-        logger.debug("CALLED: delete_company({},{},{},{},{} by {})".format(project_id,tenant_id,external_id,all,forced,inspect.currentframe().f_back.f_code.co_name))
-        db = self._db_connection
-        client = self._company_client
+        logger.debug("CALLED: delete_company({},{},{},{},{} by {})".format(project_id,tenant_id,external_id,all,forced,\
+            inspect.currentframe().f_back.f_code.co_name))
         try:
+            db = cts_db.DB().connection
+            client = self.client()  
             if forced:
                 # Get all the companies from the server directly - get_company(all,scope=full) gets everything from the server directly
                 all_companies = self.get_company(project_id=project_id,tenant_id=tenant_id,all=True)
@@ -143,22 +146,25 @@ class Company:
                 else:
                     existing_company = None
             else:
-                logger.debug("{}:Calling get_company({},{},{})".format(inspect.currentframe().f_code.co_name,project_id,tenant_id,external_id))
+                logger.debug("{}:Calling get_company({},{},{})".format(inspect.currentframe().f_code.co_name,project_id,\
+                    tenant_id,external_id))
                 existing_company = self.get_company(project_id=project_id,tenant_id=tenant_id,external_id=external_id)
                 logger.debug("{}:Existing company? {}".format(inspect.currentframe().f_code.co_name,existing_company))
             if existing_company is not None:
                 logger.info("Deleting company id: {}".format(existing_company[0].external_id))
                 client.delete_company(existing_company[0].name)
-                db.execute("DELETE FROM company where company_name = '{}'".format(existing_company[0].name))
+                db.execute("DELETE FROM company where company_name = ?",(existing_company[0].name,))
                 logger.info("Company {} deleted.".format(external_id))
                 print("Company {} deleted.".format(external_id))
 
             else:
-                logger.error("{}: Company {} does not exist.".format(inspect.currentframe().f_code.co_name,external_id))
+                logger.error("{}: Company {} does not exist.".format(inspect.currentframe().f_code.co_name,external_id),\
+                    exc_info=config.LOGGING['traceback'])
                 print("Company {} does not exist.".format(external_id))
                 return None
         except Exception as e:
-            print("{}:Error deleting company {}: {}".format(inspect.currentframe().f_code.co_name,external_id,e))
+            logger.error("{}:Error deleting company {}: {}".format(inspect.currentframe().f_code.co_name,external_id,e),\
+                exc_info=config.LOGGING['traceback'])
             raise
 
     def update_company(self,tenant_id,project_id=None,company=None,file=None):
@@ -173,13 +179,15 @@ class Company:
         Returns:
             an instance of company or None if company was not found.
         """
-        logger.debug("CALLED: get_company({},{},{},{} by function {})".format(project_id,tenant_id,external_id,all,inspect.currentframe().f_back.f_code.co_name))
-        db = self._db_connection
-        client = self._company_client
+        logger.debug("CALLED: get_company({},{},{},{} by function {})".format(project_id,tenant_id,external_id,all,\
+            inspect.currentframe().f_back.f_code.co_name))
         try:
+            db = cts_db.DB().connection
+            client = self.client()  
             if external_id is not None:
                 if all:
-                    logging.exception("{}:Conflicting arguments: --external_id and --all are mutually exclusive.".format(inspect.currentframe().f_code.co_name))
+                    logging.error("{}:Conflicting arguments: --external_id and --all are mutually exclusive."\
+                        .format(inspect.currentframe().f_code.co_name),exc_info=config.LOGGING['traceback'])
                     raise ValueError
                 # company_key = project_id+"-"+tenant_id+"-"+external_id if project_id is not None and tenant_id is not None \
                 # else project_id+"-"+external_id
@@ -188,7 +196,7 @@ class Company:
                 # logger.debug("{}:Searching for company: {}".format(inspect.currentframe().f_code.co_name,company_key))
                 logger.debug("{}:Searching for company: {}".format(inspect.currentframe().f_code.co_name,company_keys))
                 # db.execute("SELECT company_name FROM company where company_key = '{}'".format(company_key))
-                db.execute("SELECT external_id,company_name FROM company where company_key in ({})"\
+                db.execute("SELECT distinct external_id,company_name FROM company where company_key in ({})"\
                     .format(",".join("?"*len(company_keys))),company_keys)
                 rows = db.fetchall()
                 if rows == []:
@@ -197,31 +205,35 @@ class Company:
                     logger.debug("db lookup:{}".format(rows))
                     # company = client.get_company(rows[0][0])
                     if scope == 'limited':
-                        company = [object('{"external_id":"'+row[0]+'","name":"'+row[1]+'"}"') for row in rows]
-#                        company = [namedtuple("Company",company_list_item.keys())(*company_list_item.values()) \
-#                            for company_list_item in company_list]
-                        print ("Company : {}".format(company))
+                        company = [Company(row[0],row[1]) for row in rows]
+                        logger.debug("{}:Company show operation - scope limited: {}".format(inspect.currentframe().f_code.co_name,\
+                            company))
                     else:
                         company = [client.get_company(row[1]) for row in rows]
+                        logger.debug("{}:Company show operation - scope full: {}".format(inspect.currentframe().f_code.co_name,\
+                            company))
             elif all:
                 if tenant_id is not None:
                     tenant = cts_tenant.Tenant()
                     tenant_obj = tenant.get_tenant(project_id,tenant_id)
                     logger.debug("{}:Tenant retrieved:\n{}".format(inspect.currentframe().f_code.co_name,tenant_obj))
                     if tenant_obj is None:
-                        logger.error("{}:Unknown Tenant: {}".format(inspect.currentframe().f_code.co_name,tenant_id))
+                        logger.error("{}:Unknown Tenant: {}".format(inspect.currentframe().f_code.co_name,tenant_id),\
+                            exc_info=config.LOGGING['traceback'])
                         exit(1)
                     parent = tenant_obj.name
                 else:
                     parent = client.project_path(project_id)
                 logger.debug("{}:Parent path: {}".format(inspect.currentframe().f_code.co_name,parent))
                 company = [t for t in client.list_companies(parent)]
+                logger.debug("{}:Company list operation: {} companies returned".format(inspect.currentframe().f_code.co_name,\
+                    len(company)))
             else:
-                logger.exception("Invalid arguments.")
+                logger.error("Invalid arguments.",exc_info=config.LOGGING['traceback'])
                 raise AttributeError
             return company
         except Exception as e:
-            logger.error("{}:Error getting company by name {}. Message: {}".format(inspect.currentframe().f_code.co_name,external_id,e))
+            logger.error("{}:Error getting company by name {}. Message: {}".format(inspect.currentframe().f_code.co_name,external_id,e),exc_info=config.LOGGING['traceback'])
             raise 
 
 if __name__ == '__main__':
