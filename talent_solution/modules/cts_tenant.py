@@ -3,6 +3,7 @@ import os
 import sys
 import logging
 import argparse
+import inspect
 from datetime import datetime
 from modules import cts_db
 from res import config as config
@@ -16,15 +17,19 @@ class Tenant:
         try:
             self.external_id = external_id
             self.name = name
+            logging.debug("Tenant instantiated.")
         except Exception as e:
-            logging.exception("Error instantiating Tenant. Message: {}".format(e))
+            logging.error("Error instantiating Tenant. Message: {}".format(e),exc_info=config.LOGGING['traceback'])
     
     def client(self):
-        credential_file = config.APP['secret_key']
-        logger.debug("credentials: {}".format(credential_file))
-        _tenant_client = talent_v4beta1.TenantServiceClient.from_service_account_file(credential_file)
-        logger.debug("Tenant client created: {}".format(_tenant_client))
-        return _tenant_client
+        try:
+            credential_file = config.APP['secret_key']
+            logger.debug("credentials: {}".format(credential_file))
+            _tenant_client = talent_v4beta1.TenantServiceClient.from_service_account_file(credential_file)
+            logger.debug("Tenant client created: {}".format(_tenant_client))
+            return _tenant_client
+        except Exception as e:
+            logging.error("Error instantiating Tenant client. Message: {}".format(e),exc_info=config.LOGGING['traceback'])
 
     def get_tenant(self,project_id,external_id=None,all=False):
         """ Get CTS tenant by name or get all CTS tenants by project.
@@ -35,16 +40,18 @@ class Tenant:
         Returns:
             an instance of Tenant or None if tenant was not found.
         """
-        logger.debug("Get tenant called.")
-        db = cts_db.DB().connection
-        client = self.client()
+        logger.debug("CALLED: get_tenant({},{},{} by {})".format(project_id,external_id,all,inspect.currentframe().f_back.f_code.co_name))
         try:
+            db = cts_db.DB().connection
+            client = self.client()
+
             if external_id is not None:
                 if all:
                     logging.exception("Conflicting arguments: --external_id and --all are mutually exclusive.")
                     raise ValueError
                 elif project_id is not None:
-                    db.execute("SELECT external_id,tenant_name,project_id FROM tenant where tenant_key = '{}'".format(project_id+"-"+external_id))
+                    logger.debug("Tenant key to be retrieved: {}".format(project_id+"-"+external_id))
+                    db.execute("SELECT distinct external_id,tenant_name,project_id FROM tenant where tenant_key = ?",(project_id+"-"+external_id,))
                 rows = db.fetchall()
                 if rows == []:
                     return None
@@ -56,7 +63,7 @@ class Tenant:
                 tenant = [t for t in client.list_tenants(parent)]
             return tenant
         except Exception as e:
-            logger.error("Error getting tenant by name {}. Message: {}".format(external_id,e))
+            logger.error("Error getting tenant by name {}. Message: {}".format(external_id,e),exc_info=config.LOGGING['traceback'])
             raise        
 
     def create_tenant(self,project_id,external_id):
@@ -67,9 +74,10 @@ class Tenant:
         Returns:
             an instance of Tenant or None if tenant was not created.
         """
-        db = cts_db.DB().connection
-        client = self.client()
+        logger.debug("CALLED: create_tenant({},{} by {})".format(project_id,external_id,inspect.currentframe().f_back.f_code.co_name))
         try:
+            db = cts_db.DB().connection
+            client = self.client()
             existing_tenant = self.get_tenant(project_id=project_id,external_id=external_id)
             if existing_tenant is None:
                 parent = client.project_path(project_id)
@@ -77,15 +85,17 @@ class Tenant:
                 new_tenant = client.create_tenant(parent,tenant_object)
                 logger.debug("Query:INSERT INTO tenant (tenant_key,external_id,tenant_name,project_id,suspended,create_time) \
                     VALUES ('{}','{}','{}','{}','{:d}','{}')".format(project_id+"-"+external_id,new_tenant.external_id,new_tenant.name,project_id,1,datetime.now()))
+                # db.execute("INSERT INTO tenant (tenant_key,external_id,tenant_name,project_id,suspended,create_time) \
+                #     VALUES ('{}','{}','{}','{}',{:d},'{}')".format(project_id+"-"+external_id,new_tenant.external_id,new_tenant.name,project_id,1,datetime.now()))
                 db.execute("INSERT INTO tenant (tenant_key,external_id,tenant_name,project_id,suspended,create_time) \
-                    VALUES ('{}','{}','{}','{}',{:d},'{}')".format(project_id+"-"+external_id,new_tenant.external_id,new_tenant.name,project_id,1,datetime.now()))
+                    VALUES (?,?,?,?,?,?)",(project_id+"-"+external_id,new_tenant.external_id,new_tenant.name,project_id,1,datetime.now()))
                 logger.info("Tenant {} created.\n{}".format(external_id,new_tenant))
                 return new_tenant
             else:
-                logger.error("Tenant {} already exists.\n{}".format(external_id,existing_tenant))
+                logger.error("Tenant {} already exists.\n{}".format(external_id,existing_tenant),exc_info=config.LOGGING['traceback'])
                 return None
         except Exception as e:
-            print("Error creating tenant {}: {}".format(external_id,e))
+            logger.error("Error creating tenant {}: {}".format(external_id,e),exc_info=config.LOGGING['traceback'])
             self.delete_tenant(project_id,external_id,forced=True)
             raise
 
@@ -97,9 +107,10 @@ class Tenant:
         Returns:
             None - If tenant is not found.
         """
-        db = cts_db.DB().connection
-        client = self.client()
+        logger.debug("CALLED: delete_tenant({},{},{} by {})".format(project_id,external_id,forced,inspect.currentframe().f_back.f_code.co_name))
         try:
+            db = cts_db.DB().connection
+            client = self.client()
             if forced:
                 all_tenants = self.get_tenant(project_id=project_id,all=True)
                 for tenant in all_tenants:
@@ -114,13 +125,14 @@ class Tenant:
             if existing_tenant is not None:
                 logger.info("Deleting tenant name: {}".format(existing_tenant.external_id))
                 client.delete_tenant(existing_tenant.name)
-                db.execute("DELETE FROM tenant where external_id = '{}'".format(existing_tenant.external_id))
+                # db.execute("DELETE FROM tenant where external_id = '{}'".format(existing_tenant.external_id))
+                db.execute("DELETE FROM tenant where external_id = ?",(existing_tenant.external_id,))
                 logger.info("Tenant {} deleted.".format(external_id))
             else:
-                logger.error("Tenant {} does not exist.".format(external_id,existing_tenant))
+                logger.error("Tenant {} does not exist.".format(external_id,existing_tenant),exc_info=config.LOGGING['traceback'])
                 return None
         except Exception as e:
-            print("Error deleting tenant {}: {}".format(external_id,e))
+            logger.error("Error deleting tenant {}: {}".format(external_id,e),exc_info=config.LOGGING['traceback'])
             raise
 
     # def sync_tenants(self,project_id):
