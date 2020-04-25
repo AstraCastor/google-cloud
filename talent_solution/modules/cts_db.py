@@ -18,14 +18,14 @@ class DB():
             logger.debug("CTS Database connected.")
             self.check_cts_schema(self.__cursor)
         except ConnectionError as e:
-            logger.exception("Error when opening DB connection. Message:{}".format(e))
+            logger.error("Error when opening DB connection. Message:{}".format(e),exc_info=config.LOGGING['traceback'])
 
     def __enter__(self):
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.close()
-        
+
     @property
     def connection(self):
         return self.__cursor

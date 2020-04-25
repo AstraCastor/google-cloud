@@ -1,41 +1,84 @@
 from google.cloud import talent_v4beta1
-import os,sys,logging,argparse, inspect,json.decoder
+import os
+import sys
+import logging
+import argparse
+import inspect
+import re
+import json
 from datetime import datetime
 from modules import cts_db,cts_tenant,cts_company
+from res import config as config
 
-#General logging config
-log_level = os.environ.get('LOG_LEVEL','INFO')
-logger = logging.getLogger(__name__)
-logger.setLevel(log_level)
-logger_format = logging.Formatter('%(asctime)s %(filename)s:%(lineno)s %(levelname)-8s %(message)s','%Y-%m-%d %H:%M',)
 
-#Console Logging
-console_logger = logging.StreamHandler()
-console_logger.setLevel(log_level)
-console_logger.setFormatter(logger_format)
-logger.addHandler(console_logger)
-
-#TODO:Add file logging
+#Get the root logger
+logger = logging.getLogger()
 
 class Job:
-    def __init__(self,credentials=None):
+    def __init__(self,name=None,company_name=None,requisition_id=None,language=None):
         try:
-            main_dir = os.path.dirname(__file__)
-            credential_file = os.path.join(main_dir,'../res/secrets/pe-cts-poc-0bbb0b044fea.json')
-            logger.debug("credentials: {}".format(credential_file))
-            self._job_client = talent_v4beta1.JobServiceClient.from_service_account_file(credential_file)
-            logger.debug("Job client created: {}".format(self._job_client))
-            self._db_connection = cts_db.DB().connection()
-            logger.debug("Job db connection obtained: {}".format(self._db_connection))
+            self.name = name
+            self.company=company_name
+            self.requisition_id=requisition_id
+            self.language=language
+            logging.debug("Job instantiated.")
         except Exception as e:
-            logging.exception("Error instantiating Job. Message: {}".format(e))
+            logging.error("Error instantiating Job. Message: {}".format(e),exc_info=config.LOGGING['traceback'])
     
-
     def client(self):
-        return self._job_client
+        credential_file = config.APP['secret_key']
+        logger.debug("credentials: {}".format(credential_file))
+        _job_client = talent_v4beta1.JobServiceClient.from_service_account_file(credential_file)
+        logger.debug("Job client created: {}".format(_job_client))
+        return _job_client
     
     def create_job(self,project_id,tenant_id=None,job_object=None,file=None):
-        print ("create job") if file is None else print ("batch create job")
+        logger.debug("logger:CALLED: create_job({},{},{},{})".format(project_id,tenant_id,job_object,file))
+        try:
+            db = cts_db.DB().connection
+            client = self.client()    
+            if file is None:
+                print ("create job")
+            else:
+                if os.path.exists(os.path.dirname(file)):
+                    logger.debug("{}: Reading input file from {}".format(inspect.currentframe().f_code.co_name,file))
+                    batch_size = 5
+                    batch_id=1
+                    with open(file,'r') as f:
+                        job_batch=[]
+                        for line_no,line in enumerate(f,1):
+                            print ("Reading line {} - current batch: {} - Mod(line_no,batch_size) {}".format(line_no,len(job_batch),line_no%batch_size))
+                            if line_no%batch_size==0:
+                                try:
+                                    # logger.debug("Posting Jobs {}".format("\n\n".join(job_batch)))
+                                    # Convert list to set to list to get the unique list
+                                    company_ids=list(set([job['company'] for job in job_batch]))
+                                    logger.debug("Looking up companies for the current job batch:\n{}".format(company_ids))
+                                    if company_ids is not None:
+                                        company_client = cts_company.Company()
+                                        companies = company_client.get_company(project_id=project_id,tenant_id=tenant_id,external_id=(",").join(company_ids),scope='limited')
+                                        logger.debug("{}:get_company returned: {}".format(inspect.currentframe().f_code.co_name,[c.external_id for c in companies]))
+                                    else:
+                                        raise KeyError
+                                    # for job in job_batch:
+                                    #     job['company']=[company.name for company in companies if job['company']==company.external_id]
+                                    job_batch=[]
+                                except KeyError:
+                                    logger.error("Missing company field in the job object: Line {}: {}".format(line_no,line),\
+                                        exc_info=config.LOGGING['traceback'])
+                                except Exception as e:
+                                    logger.debug("Error when creating jobs. Message: {}".format(e))
+                            else:
+                                # logger.debug ("Read line:\n {}".format(line))
+                                # logger.debug("Read line type: {}".format(type(line)))
+                                job_batch.append(json.loads(line))
+        except Exception as e:
+            logger.error("{}:Error creating job:\n{}\n{}".format(inspect.currentframe().f_code.co_name,company_object,e),\
+                exc_info=config.LOGGING['traceback'])
+            self.delete_job(project_id,tenant_id,job_object['external_id'],forced=True)
+            raise
+
+                            
 
     def update_job(self,tenant_id,project_id=None,job=None,file=None):
         print ("update job") if file is None else print ("batch update job")
@@ -55,13 +98,14 @@ class Job:
         logger.debug("CALLED: get_job({},{},{},{},{},{} by {})".format(project_id,tenant_id,external_id,languages,status,all,\
             inspect.currentframe().f_back.f_code.co_name))
         try:
-            db = self._db_connection
-            client = self._job_client
+            db = cts_db.DB().connection
+            client = self.client()    
 
             if project_id is not None:
                 job_key = project_id
             else:
-                logging.exception("{}:Missing arguments: project_id.".format(inspect.currentframe().f_code.co_name))
+                logging.error("{}:Missing arguments: project_id.".format(inspect.currentframe().f_code.co_name),\
+                    exc_info=config.LOGGING['traceback'])
                 raise ValueError
 
             if tenant_id is not None:
@@ -73,15 +117,16 @@ class Job:
                 # Calculate the company_id part of the job_key to look up from the DB
                 job_key = job_key + "-" +company_id
             else:
-                logging.exception("{}:Missing arguments: company_id.".format(inspect.currentframe().f_code.co_name))
+                logging.error("{}:Missing arguments: company_id.".format(inspect.currentframe().f_code.co_name),\
+                    exc_info=config.LOGGING['traceback'])
                 raise ValueError                
 
             if external_id is not None:
                 # Check if it is a SHOW operation but was pass a conflicting arg
                 logger.debug("Req ID: {}\n".format(external_id))
                 if all:
-                    logging.exception("{}:Conflicting arguments: --external_id and --all are mutually exclusive."\
-                        .format(inspect.currentframe().f_code.co_name))
+                    logging.error("{}:Conflicting arguments: --external_id and --all are mutually exclusive."\
+                        .format(inspect.currentframe().f_code.co_name),exc_info=config.LOGGING['traceback'])
                     raise ValueError
                 #Return english listing by default
                 lang_list = [str(l) for l in languages.split(',')]
@@ -106,7 +151,8 @@ class Job:
                     tenant_obj = tenant.get_tenant(project_id,tenant_id)
                     logger.debug("{}:Tenant retrieved:\n{}".format(inspect.currentframe().f_code.co_name,tenant_obj))
                     if tenant_obj is None:
-                        logging.error("{}:Unknown Tenant: {}".format(inspect.currentframe().f_code.co_name,tenant_id))
+                        logging.error("{}:Unknown Tenant: {}".format(inspect.currentframe().f_code.co_name,tenant_id),\
+                            exc_info=config.LOGGING['traceback'])
                         exit(1)
                     parent = tenant_obj.name
                 else:
@@ -208,7 +254,9 @@ class Job:
             # return job
         except Exception as e:
             if external_id is not None:
-                logger.error("{}:Error getting job by name {}. Message: {}".format(inspect.currentframe().f_code.co_name,external_id,e))
+                logger.error("{}:Error getting job by name {}. Message: {}".format(inspect.currentframe().f_code.co_name,\
+                    external_id,e),exc_info=config.LOGGING['traceback'])
             else:
-                logger.error("{}:Error getting job for project {} company {}. Message: {}".format(inspect.currentframe().f_code.co_name,project_id,company_id,e))
+                logger.error("{}:Error getting job for project {} company {}. Message: {}".format(inspect.currentframe().f_code.co_name,
+                project_id,company_id,e),exc_info=config.LOGGING['traceback'])
             raise 
