@@ -1,4 +1,4 @@
-from google.cloud import storage,tasks_v2
+from google.cloud import storage,tasks_v2, functions
 import os,logging,inspect
 
 log_level = os.environ.get('LOG_LEVEL','INFO')
@@ -14,16 +14,14 @@ logger.addHandler(console_logger)
 
 #TODO:Add file logging
 
+class HTTPFileLoader:
 
-class LoadTask:
-    def __init__(self,project_id=None,entity=None,operation=None,filename=None):
+    def __init__(self,project_id=None,credentials=None):
         try:
             self.project_id = project_id
-            self.entity = entity
-            self.operation = operation
-            self.filename = filename
+            self.credentials = credentials
             main_dir = os.path.dirname(__file__)
-            credential_file = os.path.join(main_dir,'../res/secrets/pe-cts-poc-0bbb0b044fea.json')
+            credential_file = os.path.join(main_dir,'../res/secrets/pe-cts-poc-0bbb0b044fea.json') if self.credentials is None else self.credentials
             logger.debug("credentials: {}".format(credential_file))
             self._task_client = tasks_v2.CloudTasksClient.from_service_account_file(credential_file)
             logger.debug("Task client created: {}".format(self._task_client))
@@ -32,7 +30,12 @@ class LoadTask:
             logger.info("Tasks instantiated.")
         except Exception as e:
                 logging.exception("Error instantiating Cloud Task. Message: {}".format(e))
+    
+    def create_batch(self,filename,destination_url,batch_size=200,max_concurrent=25):
+        try:
+
+
 
 
 if __name__ == "__main__":
-    LoadTask()
+    HTTPFileLoader()
