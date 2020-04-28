@@ -7,78 +7,151 @@ import inspect
 import re
 import json
 from datetime import datetime
-from modules import cts_db,cts_tenant,cts_company
+from modules import cts_db,cts_tenant,cts_company,cts_helper
 from res import config as config
+#from google.cloud.talent_v4beta1.types import Job as talent_job
+from google.cloud.talent_v4beta1.proto.common_pb2 import CustomAttribute,RequestMetadata
+from google.protobuf.timestamp_pb2 import Timestamp
 
 
 #Get the root logger
 logger = logging.getLogger()
 
-class Job:
+class Job():
     def __init__(self,name=None,company_name=None,requisition_id=None,language=None):
         try:
             self.name = name
             self.company=company_name
             self.requisition_id=requisition_id
-            self.language=language
+            self.language_code=language
             logging.debug("Job instantiated.")
         except Exception as e:
             logging.error("Error instantiating Job. Message: {}".format(e),exc_info=config.LOGGING['traceback'])
     
     def client(self):
+        logger.setLevel(logging.DEBUG)
         credential_file = config.APP['secret_key']
         logger.debug("credentials: {}".format(credential_file))
         _job_client = talent_v4beta1.JobServiceClient.from_service_account_file(credential_file)
         logger.debug("Job client created: {}".format(_job_client))
         return _job_client
-    
+
     def create_job(self,project_id,tenant_id=None,job_object=None,file=None):
         logger.debug("logger:CALLED: create_job({},{},{},{})".format(project_id,tenant_id,job_object,file))
         try:
             db = cts_db.DB().connection
-            client = self.client()    
+            client = self.client()
             if file is None:
                 print ("create job")
             else:
+                
+                job_parent = client.tenant_path(project_id,tenant_id)
                 if os.path.exists(os.path.dirname(file)):
                     logger.debug("{}: Reading input file from {}".format(inspect.currentframe().f_code.co_name,file))
                     batch_size = 5
                     batch_id=1
+                    # job_req_metadata = {"userId":"test2","sessionId":"test2"}
+                    job_req_metadata = RequestMetadata()
+                    job_req_metadata.user_id='test2'
+                    job_req_metadata.session_id='test2'
+                    logger.debug("Request Metadata: {}".format(job_req_metadata))
+
+                    def batch_result(operation):
+                        result = operation.result()
+                        print ("Batch {} done. Results: \n{}".format(batch_id,result))
+                        return result
+
                     with open(file,'r') as f:
                         job_batch=[]
                         for line_no,line in enumerate(f,1):
-                            print ("Reading line {} - current batch: {} - Mod(line_no,batch_size) {}".format(line_no,len(job_batch),line_no%batch_size))
-                            if line_no%batch_size==0:
+                            print ("Reading line {} - current batch {} size: {} - Mod(line_no,batch_size) {}".format(line_no,batch_id, len(job_batch),line_no%batch_size))
+                            # if line_no%batch_size==0:
+                            print("Line {} is: \n{}".format(line_no, line))
+                            # check if the job exists already
+
+                            job_batch.append(json.loads(line))
+                            #TODO:delete prints
+                            print ("Outside Batch size: {}".format(len(job_batch)))
+                            if (len(job_batch) == batch_size):
                                 try:
+                                    # job_batch.append(json.loads(line))
+                                    print ("\n---------------\Batch {}--------------".format(batch_id))
+                                    print ("Inside Batch size: {}".format(len(job_batch)))
                                     # logger.debug("Posting Jobs {}".format("\n\n".join(job_batch)))
                                     # Convert list to set to list to get the unique list
                                     company_ids=list(set([job['company'] for job in job_batch]))
                                     logger.debug("Looking up companies for the current job batch:\n{}".format(company_ids))
-                                    if company_ids is not None:
+                                    if company_ids is not None and "" not in company_ids:
                                         company_client = cts_company.Company()
                                         companies = company_client.get_company(project_id=project_id,tenant_id=tenant_id,external_id=(",").join(company_ids),scope='limited')
                                         logger.debug("{}:get_company returned: {}".format(inspect.currentframe().f_code.co_name,[c.external_id for c in companies]))
                                     else:
+                                        logger.error("Missing company ID in the input file between lines {} and {}.".format(line_no-batch_size,line_no))
                                         raise KeyError
+                                    for job in job_batch:
+                                        # print ("Job[company]:{}".format(job['company']))
+                                        # print ("Company Name: {}".format([company.name for company in companies if job['company']==company.external_id][0]))
+                                        job['company']=[company.name for company in companies if job['company']==company.external_id].pop()
+                                        job['promotion_value']=int(job['promotion_value'])
+                                        job['job_start_time']=Timestamp(seconds=int(job['job_start_time']))
+                                        job['job_end_time']=Timestamp(seconds=int(job['job_end_time']))
+                                        job['posting_publish_time']=Timestamp(seconds=int(job['posting_publish_time']))
+                                        job['posting_expire_time']=Timestamp(seconds=int(job['posting_expire_time']))
+                                        for key in job['custom_attributes']:
+                                            job['custom_attributes'][key]=CustomAttribute(string_values=[job['custom_attributes'][key]['string_values'][0]],filterable=True)
+                                            # print("Custom attribs are: \n{}".format(job['custom_attributes']))
+
+                                    #TODO: delete this print
                                     # for job in job_batch:
-                                    #     job['company']=[company.name for company in companies if job['company']==company.external_id]
+                                        # print ("\n---------------\nJob:\n{}".format(job))
+                                    parent = cts_helper.get_parent(project_id,tenant_id)
+                                    logger.debug("Parent is set to {}".format(parent))
+                                    logger.debug("Posting batch {}: Lines {} to {}".format(batch_id,line_no - batch_size+1,\
+                                        line_no))
+                                    # batch_req = client.batch_create_jobs(parent,job_batch,metadata=[job_req_metadata])
+                                    # metadata ERROR: Error when creating jobs. Message: 'RequestMetadata' object is not iterable
+                                    batch_req = client.batch_create_jobs(parent,job_batch)
+                                    # logger.debug("Batch ID {} request: {}".format(batch_req.name))
+                                    # logger.debug("Batch ID {} request metadata: {}".format(batch_req.metadata))
+                                    while not batch_req.done:
+                                        sleep(100)
+                                    batch_resp = batch_req.add_done_callback(batch_result)                                        
+                                    print ("Batch ID {} response: {}".format(batch_id,batch_resp))
+                                    # print (result for result in results)
+
+                                    batch_id += 1
                                     job_batch=[]
                                 except KeyError:
                                     logger.error("Missing company field in the job object: Line {}: {}".format(line_no,line),\
                                         exc_info=config.LOGGING['traceback'])
+                                    exit(1) 
                                 except Exception as e:
-                                    logger.debug("Error when creating jobs. Message: {}".format(e))
-                            else:
+                                    # logger.debug("Error when creating jobs. Request: {} \nMetadata {} \nMessage: {}".format(batch_req.name,batch_req.metadata,e))
+                                    #AttributeError: 'Operation' object has no attribute 'name'
+                                    logger.debug("Error caught is: {} {}".format(type(e),e))
+                                    logger.debug("Error when creating jobs. Request Metadata {} \nMessage: {}".format(batch_req.metadata,e))
+                                    exit(1)
+                            #else:
                                 # logger.debug ("Read line:\n {}".format(line))
                                 # logger.debug("Read line type: {}".format(type(line)))
-                                job_batch.append(json.loads(line))
-        except Exception as e:
-            logger.error("{}:Error creating job:\n{}\n{}".format(inspect.currentframe().f_code.co_name,company_object,e),\
-                exc_info=config.LOGGING['traceback'])
-            self.delete_job(project_id,tenant_id,job_object['external_id'],forced=True)
-            raise
+                                # logger.debug ("Read line JSON:\n {}".format(json.loads(line)))
+                                # logger.debug("Read line JSON type: {}".format(type(json.loads(line))))
+                                # read_job = talent_job().ParseFromString(json.loads(line))
+                                # print ("Read Job: {}".format(read_job.name))
+                                # job['custom_attributes']
 
-                            
+
+
+        except Exception as e:
+            if job_object:
+                logger.error("{}:Error creating job:\n{}\nMessage:{}".format(inspect.currentframe().f_code.co_name,job_object,e),\
+                    exc_info=config.LOGGING['traceback'])
+            else:
+                logger.error("{}:Error creating job from file: {}. Message: {}".format(inspect.currentframe().f_code.co_name,file,e),\
+                    exc_info=config.LOGGING['traceback'])
+            # self.delete_job(project_id,tenant_id,job_object.external_id,forced=True)
+            raise
+                   
 
     def update_job(self,tenant_id,project_id=None,job=None,file=None):
         print ("update job") if file is None else print ("batch update job")
@@ -86,7 +159,7 @@ class Job:
     def delete_job(self,project_id,tenant_id=None,external_id=None,all=False,forced=False):
         print ("delete job") if all is False else print ("batch create job")
 
-    def get_job(self,project_id,company_id,tenant_id=None,external_id=None,languages='en',status='OPEN',all=False):
+    def get_job(self,project_id,company_id,tenant_id=None,external_id=None,languages='en',status='OPEN',all=False,scope='full'):
         """ Get CTS job by name or get all CTS jobs by project.
         Args:
             project_id: Project where the job will be created - string
@@ -132,14 +205,19 @@ class Job:
                 lang_list = [str(l) for l in languages.split(',')]
                 job_keys = [job_key+"-"+external_id+"-"+language for language in lang_list]
                 logger.debug("{}:Searching for job: {}".format(inspect.currentframe().f_code.co_name,job_key))
-                db.execute("SELECT distinct job_name FROM job where job_key in ({})".format(','.join('?'*len(job_keys))),job_keys)
+                db.execute("SELECT distinct job_name,external_id,language_code,company_name FROM job where job_key in ({})".format(','.join('?'*len(job_keys))),job_keys)
                 rows = db.fetchall()
                 logger.debug("Job names retrieved: {}".format(rows))
                 if rows == []:
                     return None
                 else:
                     logger.debug("db lookup:{}".format(rows))
-                    jobs = [client.get_job(row) for row in rows]
+                    if scope=='limited':
+                        jobs = [Job(name=row[0],requisition_id=row[1],language_code=row[2],company=row[4]) for row in rows]
+                        logger.debug("Returning Jobs count: {}".format(len(jobs)))
+                    else:
+                        jobs = [client.get_job(row[0]) for row in rows]
+                        logger.debug("Returning Jobs count: {}".format(len(jobs)))
                     return jobs
             else:
                 # LIST operation
@@ -167,7 +245,7 @@ class Job:
                         before creating or looking up job listings.".format(inspect.currentframe().f_code.co_name,company_id))
                     exit(1)
                 else:
-                    filter_['companyName'] = company.name
+                    filter_['companyName'] = company[0].name
                 # Add status to the filter object
                 filter_['status'] = status
                 
