@@ -224,7 +224,7 @@ class cts_cli:
                     raise ValueError("Misconfigured or missing project ID.") 
                     exit(1)
                 else:
-                    new_job = job.create_job(project_id=args.project_id,tenant_id=args.tenant_id,job_object=args.job,file=args.file)
+                    new_job = job.create_job(project_id=args.project_id,tenant_id=args.tenant_id,job_string=args.job,file=args.file)
             elif args.operation == 'delete':
                 if args.project_id is None or args.project_id == "":
                     raise ValueError("Misconfigured or missing project ID.") 

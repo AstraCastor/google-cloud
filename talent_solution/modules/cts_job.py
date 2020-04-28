@@ -36,8 +36,12 @@ class Job():
         logger.debug("Job client created: {}".format(_job_client))
         return _job_client
 
-    def create_job(self,project_id,tenant_id=None,job_object=None,file=None):
-        logger.debug("logger:CALLED: create_job({},{},{},{})".format(project_id,tenant_id,job_object,file))
+    def parse_job(self,job_string):
+        pass
+
+
+    def create_job(self,project_id,tenant_id=None,job_string=None,file=None):
+        logger.debug("logger:CALLED: create_job({},{},{},{})".format(project_id,tenant_id,job_string,file))
         try:
             db = cts_db.DB().connection
             client = self.client()
@@ -64,12 +68,16 @@ class Job():
                     with open(file,'r') as f:
                         job_batch=[]
                         for line_no,line in enumerate(f,1):
-                            print ("Reading line {} - current batch {} size: {} - Mod(line_no,batch_size) {}".format(line_no,batch_id, len(job_batch),line_no%batch_size))
+                            print ("Reading line {} - current batch {} size: {} - Mod(line_no,batch_size) {}"\
+                                .format(line_no,batch_id, len(job_batch),line_no%batch_size))
                             # if line_no%batch_size==0:
                             print("Line {} is: \n{}".format(line_no, line))
                             # check if the job exists already
-
-                            job_batch.append(json.loads(line))
+                            line_json = json.loads(line)
+                            existing_job = self.get_job(project_id=project_id,tenant_id=tenant_id,company_id=line_json['company'],external_id=line_json['requisition_id'],\
+                                languages=line_json['language_code'],scope='limited')
+                            if existing_job is None:
+                                job_batch.append(line_json)
                             #TODO:delete prints
                             print ("Outside Batch size: {}".format(len(job_batch)))
                             if (len(job_batch) == batch_size):
@@ -143,13 +151,13 @@ class Job():
 
 
         except Exception as e:
-            if job_object:
-                logger.error("{}:Error creating job:\n{}\nMessage:{}".format(inspect.currentframe().f_code.co_name,job_object,e),\
+            if job_string:
+                logger.error("{}:Error creating job:\n{}\nMessage:{}".format(inspect.currentframe().f_code.co_name,job_string,e),\
                     exc_info=config.LOGGING['traceback'])
             else:
                 logger.error("{}:Error creating job from file: {}. Message: {}".format(inspect.currentframe().f_code.co_name,file,e),\
                     exc_info=config.LOGGING['traceback'])
-            # self.delete_job(project_id,tenant_id,job_object.external_id,forced=True)
+            # self.delete_job(project_id,tenant_id,job_string.external_id,forced=True)
             raise
                    
 
@@ -168,7 +176,7 @@ class Job():
         Returns:
             an instance of job or None if job was not found.
         """
-        logger.debug("CALLED: get_job({},{},{},{},{},{} by {})".format(project_id,tenant_id,external_id,languages,status,all,\
+        logger.debug("CALLED: get_job({},{},{},{},{},{},{} by {})".format(project_id,tenant_id,external_id,languages,status,all,scope,\
             inspect.currentframe().f_back.f_code.co_name))
         try:
             db = cts_db.DB().connection
