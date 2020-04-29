@@ -52,9 +52,12 @@ class Job():
                     batch_size = 5
                     batch_id=1
                     # job_req_metadata = {"userId":"test2","sessionId":"test2"}
-                    job_req_metadata = RequestMetadata()
-                    job_req_metadata.user_id='test2'
-                    job_req_metadata.session_id='test2'
+                    # job_req_metadata = RequestMetadata()
+                    # job_req_metadata.user_id='test2'
+                    # job_req_metadata.session_id='test2'
+                    job_req_metadata = {}
+                    job_req_metadata['user_id']='test2'
+                    job_req_metadata['session_id']='test2'            
                     logger.debug("Request Metadata: {}".format(job_req_metadata))
 
                     def batch_result(operation):
@@ -95,9 +98,9 @@ class Job():
                                     logger.debug("Parent is set to {}".format(parent))
                                     logger.debug("Posting batch {}: Lines {} to {}".format(batch_id,line_no - batch_size+1,\
                                         line_no))
-                                    # batch_req = client.batch_create_jobs(parent,job_batch,metadata=[job_req_metadata])
+                                    batch_req = client.batch_create_jobs(parent,parsed_jobs,metadata=[job_req_metadata])
                                     # metadata ERROR: Error when creating jobs. Message: 'RequestMetadata' object is not iterable
-                                    batch_req = client.batch_create_jobs(parent,parsed_jobs)
+                                    # batch_req = client.batch_create_jobs(parent,parsed_jobs)
                                     print("Batch ID {} request: {}".format(batch_id,repr(batch_req)))
                                     print("Batch ID {} request: {}".format(batch_id,dir(batch_req)))
                                     print("Methods are: {}".format([method for method in dir(batch_req) if callable(getattr(batch_req, method))]))
