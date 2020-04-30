@@ -1,4 +1,6 @@
 import logging
+import os
+import sys
 from modules import cts_tenant,cts_company
 from res import config
 import json
@@ -8,6 +10,12 @@ from google.protobuf.timestamp_pb2 import Timestamp
 
 #Get the root logger
 logger = logging.getLogger()
+
+#Custom Error Classes
+class UnparseableJobError(Exception):
+    pass
+
+
 
 def get_parent(project_id,tenant_id=None):
     try:
@@ -68,9 +76,54 @@ def parse_job(project_id,tenant_id,jobs=[]):
             parsed_batch.append(job)
         
     except TypeError:
-        logger.error("Passed job string is not a valid JSON convertible string. Error when parsing:\n {}".format(job),\
+        logger.error("Passed job string is not a valid Job JSON. Error when parsing:\n {}".format(job),\
             exc_info=config.LOGGING['traceback'])
     except Exception as e:
         logger.error("Error occured when parsing job string:\n {}".format(job),exc_info=config.LOGGING['traceback'])
     else:
         return parsed_batch
+
+
+def generate_file_batch(file,rows=5,concurrent_batches=1):
+    """
+    A generator function that reads a file in batches of rows and returns a list of n batches at a time.
+
+    Parameters:\n
+    file: Full path to the location of the file. Required, Type: String.\n
+    rows: No of rows from file in each batch. Default: 5, Type: Int.\n
+    concurrent_batches: Number of batches to be returned at a time. Default: 1, Type: Int. Set to an appropriate number when batching operations \
+        like batched HTTP requests or multi threading/processing.\n
+
+    Returns:
+    A generator object that returns a list of dict of structure [{batch id:[batch]}]. 
+    """
+    if os.path.exists(file):
+        with open(file,'r') as f_handle:
+            batch_id = 1
+            concurrent_batch = []
+            batch = []
+            for line_no,line in enumerate(f_handle,1):
+                logger.debug("Reading line # {} and adding to batch {} at {}".format(line_no,batch_id,len(batch)) )
+                batch.append(line)
+                if len(batch) == rows:
+                    concurrent_batch.append({batch_id:batch})
+                    logger.debug("Concurrent batch of size {}".format(len(concurrent_batch)))
+                    if len(concurrent_batch) == concurrent_batches:
+                        logger.debug("Sending concurrent batch ")
+                        yield concurrent_batch
+                        concurrent_batch.clear()
+                    batch_id += 1
+                    batch.clear()
+            else:
+                # Add the last batch
+                if len(batch)>0:
+                    logger.debug("Sending the last batch {}".format(batch_id))
+                    concurrent_batch.append({batch_id:batch})
+                    yield concurrent_batch
+
+
+            
+                
+
+
+
