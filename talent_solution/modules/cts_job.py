@@ -13,6 +13,7 @@ from res import config as config
 #from google.cloud.talent_v4beta1.types import Job as talent_job
 from google.cloud.talent_v4beta1.proto.common_pb2 import RequestMetadata
 from google.api_core.exceptions import AlreadyExists, NotFound, GoogleAPICallError, RetryError
+from modules.cts_helper import UnparseableJobError
 
 #Get the root logger
 logger = logging.getLogger()
@@ -44,99 +45,129 @@ class Job():
             client = self.client()
             if file is None:
                 print ("create job")
-            else:
-                
+            else:                
                 job_parent = client.tenant_path(project_id,tenant_id)
                 if os.path.exists(os.path.dirname(file)):
                     logger.debug("Reading input file from {}".format(file))
+                    #TODO: Replace with a config param
                     batch_size = 5
-                    batch_id=1
-                    # job_req_metadata = {"userId":"test2","sessionId":"test2"}
-                    # job_req_metadata = RequestMetadata()
-                    # job_req_metadata.user_id='test2'
-                    # job_req_metadata.session_id='test2'
+                    # batch_id=1
+
                     job_req_metadata = {}
                     job_req_metadata['user_id']='test2'
                     job_req_metadata['session_id']='test2'            
-                    logger.debug("Request Metadata: {}".format(job_req_metadata))
+                    logger.debug("Setting request Metadata to {}".format(job_req_metadata))
 
                     def batch_result(operation):
+                        # print("Size of operation after callback: {}".format(sys.getsizeof(operation)))
                         result = operation.result()
+                        # print("Size of result after callback: {}".format(sys.getsizeof(result)))
                         # if result is not None:
                         print("Batch ID {} request: {}".format(batch_id,repr(operation)))
                         print("Batch ID {} request dir: {}".format(batch_id,dir(operation)))
                         print("Methods are: {}".format([method for method in dir(operation) if callable(getattr(operation, method))]))
+                        # print("Batch ID {} request name: {}".format(batch_id,operation.name))
                         print("Batch ID {} request metadata: {}".format(batch_id,operation.metadata))
                         print ("Batch {} done. Results: \n{}".format(batch_id,result))
                         return result   
 
-                    with open(file,'r') as f:
-                        job_batch=[]
-                        for line_no,line in enumerate(f,1):
-                            print("Reading line {} - current batch {} size: {} - Mod(line_no,batch_size) {}"\
-                                .format(line_no,batch_id, len(job_batch),line_no%batch_size))
-                            # if line_no%batch_size==0:
-                            # print("Line {} is: \n{}".format(line_no, line))
-                            # check if the job exists already
-                            line_json = json.loads(line)
-                            existing_job = self.get_job(project_id=project_id,tenant_id=tenant_id,company_id=line_json['company'],external_id=line_json['requisition_id'],\
-                                languages=line_json['language_code'],scope='limited')
-                            if existing_job is None:
-                                job_batch.append(line)
-                                
-                            # If the batch has enough jobs
-                            if (len(job_batch) == batch_size or line is None):
+                    # Generate the batches to be posted
+                    for concurrent_batch in cts_helper.generate_file_batch(file=file,rows=batch_size,concurrent_batches=1):
+                        for batch in concurrent_batch:
+                            try:
+                                batch_id,jobs = batch.popitem()
+                                logger.debug("Batch {}: Parsing {} jobs".format(batch_id,len(jobs)))
+                                parsed_jobs = cts_helper.parse_job(project_id=project_id,tenant_id=tenant_id,jobs=jobs)
+                                if parsed_jobs is None:
+                                    raise UnparseableJobError
+                                parent = cts_helper.get_parent(project_id,tenant_id)
+                                logger.debug("Batch {}: Parent is set to {}".format(batch_id,parent))
+
+                            except UnparseableJobError as e:
+                                logger.warning("Batch {}: Unable to parse one or more jobs between lines {} and {}".format((batch_id*batch_size),\
+                                    (batch_id*batch_size)+batch_size))
+                            else:
                                 try:
-                                    # job_batch.append(json.loads(line))
-                                    logger.debug ("\n---------------Batch {}--------------".format(batch_id))
-                                    parsed_jobs = cts_helper.parse_job(project_id=project_id,tenant_id=tenant_id,jobs=job_batch)
-                                    # If the current batch of jobs is unparseable, skip posting
-                                    if parsed_jobs is None:
-                                        continue
-
-                                    parent = cts_helper.get_parent(project_id,tenant_id)
-                                    logger.debug("Parent is set to {}".format(parent))
-                                    logger.debug("Posting batch {}: Lines {} to {}".format(batch_id,line_no - batch_size+1,\
-                                        line_no))
+                                    logger.debug("Batch {}: Posting lines {} to {}".format(batch_id,(batch_id*batch_size),(batch_id*batch_size)+batch_size))
                                     batch_req = client.batch_create_jobs(parent,parsed_jobs,metadata=[job_req_metadata])
-                                    # metadata ERROR: Error when creating jobs. Message: 'RequestMetadata' object is not iterable
-                                    # batch_req = client.batch_create_jobs(parent,parsed_jobs)
-                                    print("Batch ID {} request: {}".format(batch_id,repr(batch_req)))
-                                    print("Batch ID {} request: {}".format(batch_id,dir(batch_req)))
-                                    print("Methods are: {}".format([method for method in dir(batch_req) if callable(getattr(batch_req, method))]))
-                                    # logger.debug("Batch ID {} request metadata: {}".format(batch_req.metadata))
-                                    # logger.debug("Batch ID {} request done? {}".format(batch_req.done))
-                                    # print("Batch ID {} request: {}".format(batch_id,batch_req.metadata))
-
-                                    while not batch_req.done():
-                                        print("Going to sleep for 3 seconds...")
-                                        print("Batch ID {} request: {}".format(batch_id,repr(batch_req)))
-                                        time.sleep(3)
-                                    # print ("Batch ID {} response: {}".format(batch_id,batch_resp))
-                                    # print (result for result in results)
-                                    batch_results = batch_req.add_done_callback(batch_result)
-
-                                    batch_id += 1
-                                    job_batch=[]
-                                except ValueError:
-                                    logger.error("Invalid Parameters: Line {}: {}".format(line_no,line),\
-                                        exc_info=config.LOGGING['traceback'])
-                                except RetryError:
-                                    logger.error("API Retry failed: Line {}: {}".format(line_no,line),\
+                                    # logger.debug("---------------- Batch {} ({} Jobs) --------------".format(batch_id,len(parsed_jobs)))
+                                except RetryError as e:
+                                    logger.error("Batch {}: API Retry failed due to {}.".format(batch_id,e),\
                                         exc_info=config.LOGGING['traceback'])
                                 except GoogleAPICallError as e:
-                                    logger.error("CTA API Error: Line {}: {}".format(line_no,line),\
+                                    logger.error("Batch {}: CTS API Error due to {}".format(batch_id,e),\
                                         exc_info=config.LOGGING['traceback'])
-                                except KeyError:
-                                    logger.error("Missing company field in the job object: Line {}: {}".format(line_no,line),\
-                                        exc_info=config.LOGGING['traceback'])
-                                    exit(1) 
-                                except Exception as e:
-                                    # logger.debug("Error when creating jobs. Request: {} \nMetadata {} \nMessage: {}".format(batch_req.name,batch_req.metadata,e))
-                                    #AttributeError: 'Operation' object has no attribute 'name'
-                                    logger.debug("Error caught is: {} {}".format(type(e),e))
-                                    logger.debug("Error when creating jobs. Request Metadata {} \nMessage: {}".format(batch_req.metadata,e))
-                                    exit(1)
+
+
+
+                    # with open(file,'r') as f:
+                    #     job_batch=[]
+                    #     for line_no,line in enumerate(f,1):
+                    #         print("Reading line {} - current batch {} size: {} - Mod(line_no,batch_size) {}"\
+                    #             .format(line_no,batch_id, len(job_batch),line_no%batch_size))
+                    #         # if line_no%batch_size==0:
+                    #         # print("Line {} is: \n{}".format(line_no, line))
+                    #         # check if the job exists already
+                    #         line_json = json.loads(line)
+                    #         existing_job = self.get_job(project_id=project_id,tenant_id=tenant_id,company_id=line_json['company'],external_id=line_json['requisition_id'],\
+                    #             languages=line_json['language_code'],scope='limited')
+                    #         if existing_job is None:
+                    #             job_batch.append(line)
+                                
+                    #         # If the batch has enough jobs
+                    #         if (len(job_batch) == batch_size or line is None):
+                    #             try:
+                    #                 # job_batch.append(json.loads(line))
+                    #                 logger.debug ("\n---------------Batch {}--------------".format(batch_id))
+                    #                 parsed_jobs = cts_helper.parse_job(project_id=project_id,tenant_id=tenant_id,jobs=job_batch)
+                    #                 # If the current batch of jobs is unparseable, skip posting
+                    #                 if parsed_jobs is None:
+                    #                     continue
+
+                    #                 parent = cts_helper.get_parent(project_id,tenant_id)
+                    #                 logger.debug("Parent is set to {}".format(parent))
+                    #                 logger.debug("Posting batch {}: Lines {} to {}".format(batch_id,line_no - batch_size+1,\
+                    #                     line_no))
+                    #                 batch_req = client.batch_create_jobs(parent,parsed_jobs,metadata=[job_req_metadata])
+                    #                 # metadata ERROR: Error when creating jobs. Message: 'RequestMetadata' object is not iterable
+                    #                 # batch_req = client.batch_create_jobs(parent,parsed_jobs)
+                    #                 print("Batch ID {} request: {}".format(batch_id,repr(batch_req)))
+                    #                 print("Batch ID {} request: {}".format(batch_id,dir(batch_req)))
+                    #                 print("Methods are: {}".format([method for method in dir(batch_req) if callable(getattr(batch_req, method))]))
+                    #                 # logger.debug("Batch ID {} request metadata: {}".format(batch_req.metadata))
+                    #                 # logger.debug("Batch ID {} request done? {}".format(batch_req.done))
+                    #                 # print("Batch ID {} request: {}".format(batch_id,batch_req.metadata))
+                    #                 print("Size of operation before callback: {}".format(sys.getsizeof(batch_req)))
+
+                    #                 while not batch_req.done():
+                    #                     print("Going to sleep for 3 seconds...")
+                    #                     print("Batch ID {} request: {}".format(batch_id,repr(batch_req)))
+                    #                     time.sleep(3)
+                    #                 # print ("Batch ID {} response: {}".format(batch_id,batch_resp))
+                    #                 # print (result for result in results)
+                    #                 batch_results = batch_req.add_done_callback(batch_result)
+
+                    #                 batch_id += 1
+                    #                 job_batch=[]
+                    #             except ValueError:
+                    #                 logger.error("Invalid Parameters: Line {}: {}".format(line_no,line),\
+                    #                     exc_info=config.LOGGING['traceback'])
+                    #             except RetryError:
+                    #                 logger.error("API Retry failed: Line {}: {}".format(line_no,line),\
+                    #                     exc_info=config.LOGGING['traceback'])
+                    #             except GoogleAPICallError as e:
+                    #                 logger.error("CTA API Error: Line {}: {}".format(line_no,line),\
+                    #                     exc_info=config.LOGGING['traceback'])
+                    #             except KeyError:
+                    #                 logger.error("Missing company field in the job object: Line {}: {}".format(line_no,line),\
+                    #                     exc_info=config.LOGGING['traceback'])
+                    #                 exit(1) 
+                    #             except Exception as e:
+                    #                 # logger.debug("Error when creating jobs. Request: {} \nMetadata {} \nMessage: {}".format(batch_req.name,batch_req.metadata,e))
+                    #                 #AttributeError: 'Operation' object has no attribute 'name'
+                    #                 logger.debug("Error caught is: {} {}".format(type(e),e))
+                    #                 logger.debug("Error when creating jobs. Request Metadata {} \nMessage: {}".format(batch_req.metadata,e))
+                    #                 exit(1)
         except Exception as e:
             if job_string:
                 logger.error("{}:Error creating job:\n{}\nMessage:{}".format(inspect.currentframe().f_code.co_name,job_string,e),\
@@ -190,7 +221,7 @@ class Job():
                 raise ValueError                
 
             if external_id is not None:
-                # Check if it is a SHOW operation but was pass a conflicting arg
+                # Check if it is a SHOW operation but was passed a conflicting arg
                 logger.debug("Req ID: {}\n".format(external_id))
                 if all:
                     logging.error("{}:Conflicting arguments: --external_id and --all are mutually exclusive."\
