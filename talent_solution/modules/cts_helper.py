@@ -1,7 +1,7 @@
 import logging
 import os
 import sys
-import datetime
+from datetime import datetime
 import json
 import re
 
@@ -11,6 +11,7 @@ from res import config
 
 from google.cloud.talent_v4beta1.proto.common_pb2 import CustomAttribute
 from google.protobuf.timestamp_pb2 import Timestamp
+from google.cloud.talent_v4beta1.types import Job as talent_job
 
 #Get the root logger
 logger = logging.getLogger()
@@ -44,7 +45,9 @@ def parse_job(project_id,tenant_id,jobs=[]):
         for job in jobs:
             if isinstance(job,str):
                 job_batch.append(json.loads(job))
-            else:
+            elif isinstance(job,dict):
+                job_batch.append(job)
+            else:                
                 raise UnparseableJobError
         
         company_ids=list(set([job['company'] for job in job_batch]))
@@ -136,10 +139,10 @@ def generate_file_batch(file,rows=5,concurrent_batches=1):
 def persist_to_db(object,project_id,tenant_id=None,company_id=None):
     try:
         db = cts_db.DB().connection
-        if isinstance(object,cts_job.Job):
+        if isinstance(object,talent_job):
             job = object
             external_id = job.requisition_id
-            language = job.language
+            language = job.language_code
             company_name = job.company
 
             if project_id is not None:
@@ -171,16 +174,16 @@ def persist_to_db(object,project_id,tenant_id=None,company_id=None):
                 logging.error("Missing arguments: external_id.",exc_info=config.LOGGING['traceback'])
 
             logger.debug("Inserting record for job key:{}".format(job_key))
-            logger.debug("Query: INSERT INTO job (job_key,external_id,job_name,company_name,tenant_name,project_id,suspended,create_time)    \
-                VALUES ('{}','{}','{}','{}','{}','{}','{:d}','{}')".format(job_key,external_id,job.name,company_name,\
+            logger.debug("Query: INSERT INTO job (job_key,external_id,language_code,job_name,company_name,tenant_name,project_id,suspended,create_time)    \
+                VALUES ('{}','{}','{}','{}','{}','{}','{}','{:d}','{}')".format(job_key,external_id,language,job.name,company_name,\
                     tenant_name,project_id,0,datetime.now()))
-            db.execute("INSERT INTO company (job_key,external_id,company_name,tenant_name,project_id,suspended,create_time) \
-                VALUES (?,?,?,?,?,?,?)",\
-                (job_key,job.external_id,job.name,company_name,tenant_name,project_id,0,datetime.now()))
-            logger.info("Job req ID {} created in DB for company {}.".format(external_id,company_id))
+            db.execute("INSERT INTO job (job_key,external_id,language_code,job_name,company_name,tenant_name,project_id,suspended,create_time) \
+                VALUES (?,?,?,?,?,?,?,?,?)",(job_key,external_id,language,job.name,company_name,tenant_name,project_id,0,datetime.now()))
+            logger.debug("Job req ID {} created in DB for company {}.".format(external_id,company_id))
             return True
     except Exception as e:
-        logger.error("Error when creating job req ID in DB for company {}.".format(external_id,company_id))
+        logger.error("Error when creating job req ID {} in DB for company {}. Message: {}".format(external_id,\
+            company_id,e))
 
 
 
