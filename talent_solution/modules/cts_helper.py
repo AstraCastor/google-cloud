@@ -1,20 +1,19 @@
 import logging
 import os
 import sys
-from modules import cts_tenant,cts_company
-from res import config
+import datetime
 import json
+import re
+
+from modules import cts_tenant,cts_company,cts_job, cts_db
+from modules.cts_errors import UnparseableJobError,UnknownCompanyError
+from res import config
 
 from google.cloud.talent_v4beta1.proto.common_pb2 import CustomAttribute
 from google.protobuf.timestamp_pb2 import Timestamp
 
 #Get the root logger
 logger = logging.getLogger()
-
-#Custom Error Classes
-class UnparseableJobError(Exception):
-    pass
-
 
 
 def get_parent(project_id,tenant_id=None):
@@ -46,21 +45,25 @@ def parse_job(project_id,tenant_id,jobs=[]):
             if isinstance(job,str):
                 job_batch.append(json.loads(job))
             else:
-                raise TypeError
+                raise UnparseableJobError
         
         company_ids=list(set([job['company'] for job in job_batch]))
         logger.debug("Looking up companies for the current job batch:\n{}".format(company_ids))
         if company_ids is not None and "" not in company_ids:
             company_client = cts_company.Company()
             companies = company_client.get_company(project_id=project_id,tenant_id=tenant_id,external_id=(",").join(company_ids),scope='limited')
-            logger.debug("get_company returned: {}".format([c.external_id for c in companies]))
+            if companies is not None:
+                logger.debug("get_company returned: {}".format([c.external_id for c in companies]))
+            # Check if all companies were looked up
+                if len(company_ids)!=len(companies):
+                    companies_ids = [comp['external_id'] for comp in companies]
+                    raise UnknownCompanyError("Missing or unknown company ID(s): {}".format(company_ids - companies))
+            else:
+                raise UnknownCompanyError("Missing or unknown company ID(s): {}".format(company_ids))
         else:
-            logger.error("Missing or unknown company ID in the input jobs".format())
-            raise KeyError
-        # Check if all companies were looked up
-        if len(company_ids)!=len(companies):
-            companies_ids = [comp['external_id'] for comp in companies]
-            raise ValueError("Missing or unknown company external ids:: {}".format(company_ids - companies))
+            logger.error("Missing company ID(s) in the input jobs")
+            raise UnknownCompanyError
+
         
         parsed_batch = []
         #Parse the jobs now
@@ -71,11 +74,17 @@ def parse_job(project_id,tenant_id,jobs=[]):
             job['job_end_time']=Timestamp(seconds=int(job['job_end_time']))
             job['posting_publish_time']=Timestamp(seconds=int(job['posting_publish_time']))
             job['posting_expire_time']=Timestamp(seconds=int(job['posting_expire_time']))
-            for key in job['custom_attributes']:
-                job['custom_attributes'][key]=CustomAttribute(string_values=[job['custom_attributes'][key]['string_values'][0]],filterable=True)
+            for attr in job['custom_attributes']:
+                # job['custom_attributes'][key]=CustomAttribute(string_values=[job['custom_attributes'][key]['string_values'][0]],filterable=True)
+                if 'string_values' in job['custom_attributes'][attr]:
+                    job['custom_attributes'][attr]=CustomAttribute(string_values=job['custom_attributes'][attr]['string_values'],filterable=job['custom_attributes'][attr]['filterable'])
+                elif 'long_values' in job['custom_attributes'][attr]:
+                    job['custom_attributes'][attr]=CustomAttribute(long_values=job['custom_attributes'][attr]['long_values'],filterable=job['custom_attributes'][attr]['filterable'])
+                else:
+                    raise UnparseableJobError
             parsed_batch.append(job)
         
-    except TypeError:
+    except UnparseableJobError:
         logger.error("Passed job string is not a valid Job JSON. Error when parsing:\n {}".format(job),\
             exc_info=config.LOGGING['traceback'])
     except Exception as e:
@@ -120,10 +129,58 @@ def generate_file_batch(file,rows=5,concurrent_batches=1):
                     logger.debug("Sending the last batch {}".format(batch_id))
                     concurrent_batch.append({batch_id:batch})
                     yield concurrent_batch
+    else:
+        raise FileNotFoundError("Missing file {}.".format(file))
 
 
+def persist_to_db(object,project_id,tenant_id=None,company_id=None):
+    try:
+        db = cts_db.DB().connection
+        if isinstance(object,cts_job.Job):
+            job = object
+            external_id = job.requisition_id
+            language = job.language
+            company_name = job.company
+
+            if project_id is not None:
+                job_key = project_id
+            else:
+                logging.error("Missing arguments: project_id.",exc_info=config.LOGGING['traceback'])
+                raise ValueError
+
+            if tenant_id is not None:
+                # Calculate the tenant_id part of the job_key to look up from the DB
+                logger.debug("Tenant: {}\n".format(tenant_id))
+                job_key = job_key + "-" + tenant_id
+                tenant_name = re.search('(.*)\/jobs\/.*$',job.name).group(1)
             
-                
+            if company_id is not None:
+                job_key = job_key + "-" +company_id
+            else:
+                logging.error("Missing arguments: company_id.",exc_info=config.LOGGING['traceback'])
+                raise ValueError                
+
+            if external_id is not None:
+                job_key = job_key+"-"+external_id
+            else:
+                logging.error("Missing arguments: external_id.",exc_info=config.LOGGING['traceback'])
+            
+            if language is not None:
+                job_key = job_key+"-"+language
+            else:
+                logging.error("Missing arguments: external_id.",exc_info=config.LOGGING['traceback'])
+
+            logger.debug("Inserting record for job key:{}".format(job_key))
+            logger.debug("Query: INSERT INTO job (job_key,external_id,job_name,company_name,tenant_name,project_id,suspended,create_time)    \
+                VALUES ('{}','{}','{}','{}','{}','{}','{:d}','{}')".format(job_key,external_id,job.name,company_name,\
+                    tenant_name,project_id,0,datetime.now()))
+            db.execute("INSERT INTO company (job_key,external_id,company_name,tenant_name,project_id,suspended,create_time) \
+                VALUES (?,?,?,?,?,?,?)",\
+                (job_key,job.external_id,job.name,company_name,tenant_name,project_id,0,datetime.now()))
+            logger.info("Job req ID {} created in DB for company {}.".format(external_id,company_id))
+            return True
+    except Exception as e:
+        logger.error("Error when creating job req ID in DB for company {}.".format(external_id,company_id))
 
 
 
