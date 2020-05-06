@@ -1,6 +1,7 @@
 __pycache__
 .DS_store
 res/secrets
+test/data
 .vscode
 *.code-workspace
 *.db
