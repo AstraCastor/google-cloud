@@ -94,7 +94,7 @@ class cts_cli:
             If not provided, this will be created under default tenant.")
         job_create_mutex_args = parser_job_create.add_mutually_exclusive_group(required=True)
         job_create_mutex_args.add_argument("--job",help="Job object. Mandatory attributes: \
-            {\"external_id\":\"<external id>\"}",type=json_loads)
+            {\"external_id\":\"<external id>\"}",type=json_loads)          
         job_create_mutex_args.add_argument("--file",help="Path to the file to be loaded in batch mode.")
 
         parser_job_delete = subparsers_job.add_parser("delete",help="Delete a CTS job.")
@@ -224,7 +224,7 @@ class cts_cli:
                     raise ValueError("Misconfigured or missing project ID.") 
                     exit(1)
                 else:
-                    new_job = job.create_job(project_id=args.project_id,tenant_id=args.tenant_id,job_string=args.job,file=args.file)
+                    new_job = job.create_job(project_id=args.project_id,tenant_id=args.tenant_id,input_job=args.job,file=args.file)
             elif args.operation == 'delete':
                 if args.project_id is None or args.project_id == "":
                     raise ValueError("Misconfigured or missing project ID.") 
