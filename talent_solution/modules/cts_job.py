@@ -91,7 +91,6 @@ class Job():
                     logger.debug("Reading input file from {}".format(file))
                     #TODO: Replace with a config param
                     batch_size = 5
-                    # batch_id=1
                     logger.debug("Batching the file {} to be posted...".format(file))
 
                     def operation_complete(operation_future):
@@ -154,9 +153,6 @@ class Job():
                            logger.debug("Waiting on batch {}".format(id))
                            time.sleep(3)
                         print("Batch ID {} Status: {}".format(batch_id,batch_ops[batch_id].metadata.state))
-
-
-                
                 else:
                     raise FileNotFoundError("Missing input file.")
 
@@ -269,83 +265,6 @@ class Job():
                 jobs = [t for t in client.list_jobs(parent,filter_)]
                 return jobs
 
-            # #Show operation
-            # if not all:
-            #     # Calculate the job_key to look up from the DB
-            #     if company_id is not None:
-            #         # Check if company name was passed in the attribute as well which would conflict with the command line option
-            #         if filter_obj is not None: 
-            #             if filter_obj['companyName'] is not None:
-            #                 logging.exception("Conflicting arguments: --company_id and companyName filter are mutually exclusive.")
-            #                 raise ValueError
-            #         else: 
-            #             filter_obj = {}
-                
-            #         # Check if the tenant is default tenant or a specific tenant
-            #         if tenant_id is not None:
-            #             # Check if it is list operation or a show operation
-            #             logger.debug("Tenant: {}\n".format(tenant_id))
-            #             if external_id is not None:
-            #                 # Check if it is a show operation but was pass a conflicting arg
-            #                 logger.debug("Req ID: {}\n".format(external_id))
-            #                 if all:
-            #                     logging.exception("Conflicting arguments: --external_id and --all are mutually exclusive.")
-            #                     raise ValueError
-            #                 job_key = project_id+"-"+tenant_id+"-"+company_id+"-"+external_id 
-            #             else:
-            #                 # No requisition ID was passed
-            #                 job_key = project_id+"-"+tenant_id+"-"+company_id
-            #         else:
-            #             # No tenant ID was passed - default tenant
-            #             job_key = project_id+"-"+company_id
-                    
-            #         logger.debug("Searching for job: {}".format(job_key))
-            #         db.execute("SELECT job_name FROM job where job_key like '{}%'".format(job_key))
-            #         rows = db.fetchall()
-            #         logger.debug("Job name retrieved: {}".format(rows[0][0]))
-            #         if rows == []:
-            #             return None
-            #         else:
-            #             logger.debug("db lookup:{}".format(rows))
-            #             job = client.get_job(rows[0][0])
-            # #List operation (where all is True)
-            # else:
-            #     logger.debug("Listing jobs for:\nCompany: {}\n".format(company_id))
-            #     #   if tenant_id is not None:
-            #     if tenant_id is not None:
-            #         logger.debug("Tenant: {}\n".format(tenant_id))
-            #         tenant = cts_tenant.Tenant()
-            #         tenant_obj = tenant.get_tenant(project_id,tenant_id)
-            #         logger.debug("Tenant retrieved:\n{}".format(tenant_obj))
-            #         if tenant_obj is None:
-            #             logging.error("Unknown Tenant: {}".format(tenant_id))
-            #             exit(1)
-            #         parent = tenant_obj.name
-            #     else:
-            #         parent = client.project_path(project_id)
-            #     logger.debug("Parent path: {}".format(parent))
-            #     if company_id is not None:
-            #         # Check if company name was passed in the attribute as well which would conflict with the command line option
-            #         if filter_obj is not None: 
-            #             if filter_obj['companyName'] is not None:
-            #                 logging.exception("Conflicting arguments: --company_id and companyName filter are mutually exclusive.")
-            #                 raise ValueError
-            #         else: 
-            #             filter_obj = {}
-            #         company = cts_company.Company().get_company(project_id=project_id,tenant_id=tenant_id,external_id=company_id)
-            #         logger.debug("Company retrieved:\n{}".format(company))
-            #         if company is None:
-            #             logging.error("Unknown company: {}. Company is a mandatory attribute for a job listing, create the company \
-            #                 before creating or looking up a job listing.".format(company_id))
-            #             exit(1)
-            #         else:
-            #             filter_obj['companyName'] = company.name
-                
-            #     logger.debug ("Listing all jobs for {}, filtered by: \n{}".format(parent,filter_obj))
-            #     filter_ = json.dumps(filter_obj).encode('utf-8')
-            #     job = [t for t in client.list_jobs(parent,filter_)]
- 
-            # return job
         except Exception as e:
             if external_id is not None:
                 logger.error("Error getting job by name {}. Message: {}".format(\
