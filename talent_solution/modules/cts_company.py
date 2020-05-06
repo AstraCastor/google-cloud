@@ -10,6 +10,8 @@ import re
 import json
 from datetime import datetime
 from modules import cts_db,cts_tenant
+from modules.cts_errors import UnknownCompanyError
+from modules.cts_helper import get_parent
 from res import config as config
 
 #Get the root logger
@@ -189,29 +191,34 @@ class Company:
                     logging.error("{}:Conflicting arguments: --external_id and --all are mutually exclusive."\
                         .format(inspect.currentframe().f_code.co_name),exc_info=config.LOGGING['traceback'])
                     raise ValueError
-                # company_key = project_id+"-"+tenant_id+"-"+external_id if project_id is not None and tenant_id is not None \
-                # else project_id+"-"+external_id
+                # List of company external_ids provided as args
+                company_ids = external_id.split(",")
+                # Build the DB lookup key for the company table
                 company_keys=[project_id+"-"+tenant_id+"-"+company_id if project_id is not None and tenant_id is not None \
-                else project_id+"-"+company_id for company_id in external_id.split(",")]
-                # logger.debug("{}:Searching for company: {}".format(inspect.currentframe().f_code.co_name,company_key))
+                else project_id+"-"+company_id for company_id in company_ids]
                 logger.debug("{}:Searching for company: {}".format(inspect.currentframe().f_code.co_name,company_keys))
-                # db.execute("SELECT company_name FROM company where company_key = '{}'".format(company_key))
+                # Lookup companies in the DB
                 db.execute("SELECT distinct external_id,company_name FROM company where company_key in ({})"\
                     .format(",".join("?"*len(company_keys))),company_keys)
                 rows = db.fetchall()
                 if rows == []:
+                    print("Unknown company ID(s): {}".format(external_id))
                     return None
                 else:
                     logger.debug("db lookup:{}".format(rows))
-                    # company = client.get_company(rows[0][0])
                     if scope == 'limited':
-                        company = [Company(row[0],row[1]) for row in rows]
-                        logger.debug("{}:Company show operation - scope limited: {}".format(inspect.currentframe().f_code.co_name,\
-                            company))
+                        #Return limited data looked up from the DB
+                        lookedup_companies = [Company(row[0],row[1]) for row in rows]
+                        logger.debug("Company show operation - scope limited: {}".format(lookedup_companies))
                     else:
-                        company = [client.get_company(row[1]) for row in rows]
-                        logger.debug("{}:Company show operation - scope full: {}".format(inspect.currentframe().f_code.co_name,\
-                            company))
+                        #Return limited data looked up from the server
+                        lookedup_companies = [client.get_company(row[1]) for row in rows]
+                        logger.debug("Company show operation - scope full: {}".format(lookedup_companies))
+                if len(company_ids)!=len(lookedup_companies):
+                    lookedup_ids = [lc['external_id'] for lc in lookedup_companies]
+                    raise UnknownCompanyError("Missing or unknown company ID(s): {}".format(company_ids - lookedup_ids))
+
+            # It's a list all operation
             elif all:
                 if tenant_id is not None:
                     tenant = cts_tenant.Tenant()
@@ -225,15 +232,15 @@ class Company:
                 else:
                     parent = client.project_path(project_id)
                 logger.debug("{}:Parent path: {}".format(inspect.currentframe().f_code.co_name,parent))
-                company = [t for t in client.list_companies(parent)]
+                lookedup_companies = [t for t in client.list_companies(parent)]
                 logger.debug("{}:Company list operation: {} companies returned".format(inspect.currentframe().f_code.co_name,\
-                    len(company)))
+                    len(lookedup_companies)))
             else:
                 logger.error("Invalid arguments.",exc_info=config.LOGGING['traceback'])
                 raise AttributeError
-            return company
+            return lookedup_companies
         except Exception as e:
-            logger.error("{}:Error getting company by name {}. Message: {}".format(inspect.currentframe().f_code.co_name,external_id,e),exc_info=config.LOGGING['traceback'])
+            logger.error("Error getting company by name {}. Message: {}".format(external_id,e),exc_info=config.LOGGING['traceback'])
             raise 
 
 if __name__ == '__main__':

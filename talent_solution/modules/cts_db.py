@@ -3,6 +3,7 @@ import logging
 import sys
 import os
 from res import config as config
+from modules.cts_errors import CTSSchemaError
 
 #General logging config
 logger = logging.getLogger()
@@ -86,7 +87,8 @@ class DB():
                 else:
                     logger.debug("DB check: {} OK".format(table))
             if errors:
-                raise MultipleErrors(errors)
+                #TODO: Create custom MultipleErrors
+                raise CTSSchemaError(errors)
         except Exception as e:
             logger.error("Schema check failed. Message: {}".format(e),exc_info=config.LOGGING['traceback'])
 
