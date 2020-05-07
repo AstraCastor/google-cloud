@@ -12,7 +12,7 @@ from datetime import datetime
 from modules import cts_db,cts_tenant
 from modules.cts_errors import UnknownCompanyError
 from modules.cts_helper import get_parent
-from res import config as config
+from conf import config as config
 
 #Get the root logger
 logger = logging.getLogger()

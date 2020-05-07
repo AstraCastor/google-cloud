@@ -2,7 +2,7 @@ import sqlite3
 import logging
 import sys
 import os
-from res import config as config
+from conf import config
 from modules.cts_errors import CTSSchemaError
 
 #General logging config

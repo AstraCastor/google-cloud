@@ -4,7 +4,7 @@ import os
 import sys
 import logging
 import argparse
-import res.config as config
+from conf import config
 from json import loads as json_loads
 from modules import cts_tenant,cts_company,cts_job
 

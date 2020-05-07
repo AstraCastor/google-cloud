@@ -9,7 +9,7 @@ import json
 from datetime import datetime
 import time
 from modules import cts_db,cts_tenant,cts_company,cts_helper
-from res import config as config
+from conf import config as config
 from google.cloud.talent_v4beta1.types import Job as CTS_Job
 from google.cloud.talent_v4beta1.proto.common_pb2 import RequestMetadata
 from google.api_core.exceptions import AlreadyExists, NotFound, GoogleAPICallError, RetryError

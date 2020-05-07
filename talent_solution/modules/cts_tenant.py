@@ -6,7 +6,7 @@ import argparse
 import inspect
 from datetime import datetime
 from modules import cts_db
-from res import config as config
+from conf import config as config
 
 #Get the root logger
 logger = logging.getLogger()

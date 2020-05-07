@@ -7,7 +7,7 @@ import re
 
 from modules import cts_tenant,cts_company,cts_job, cts_db
 from modules.cts_errors import UnparseableJobError,UnknownCompanyError
-from res import config
+from conf import config
 
 from google.cloud.talent_v4beta1.proto.common_pb2 import CustomAttribute
 from google.protobuf.timestamp_pb2 import Timestamp
