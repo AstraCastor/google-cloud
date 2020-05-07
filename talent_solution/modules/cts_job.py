@@ -10,7 +10,7 @@ from datetime import datetime
 import time
 from modules import cts_db,cts_tenant,cts_company,cts_helper
 from res import config as config
-#from google.cloud.talent_v4beta1.types import Job as talent_job
+from google.cloud.talent_v4beta1.types import Job as CTS_Job
 from google.cloud.talent_v4beta1.proto.common_pb2 import RequestMetadata
 from google.api_core.exceptions import AlreadyExists, NotFound, GoogleAPICallError, RetryError
 from modules.cts_errors import UnparseableJobError
@@ -19,12 +19,12 @@ from modules.cts_errors import UnparseableJobError
 logger = logging.getLogger()
 
 class Job():
-    def __init__(self,name=None,company_name=None,requisition_id=None,language=None):
+    def __init__(self,name=None,company=None,requisition_id=None,language_code=None):
         try:
             self.name = name
-            self.company=company_name
+            self.company=company
             self.requisition_id=requisition_id
-            self.language_code=language
+            self.language_code=language_code
             logging.debug("Job instantiated.")
         except Exception as e:
             logging.error("Error instantiating Job. Message: {}".format(e),exc_info=config.LOGGING['traceback'])
@@ -40,7 +40,7 @@ class Job():
     def create_job(self,project_id,tenant_id=None,input_job=None,file=None):
         logger.debug("logger:CALLED: create_job({},{},{},{})".format(project_id,tenant_id,input_job,file))
         try:
-            db = cts_db.DB().connection
+            # db = cts_db.DB().connection
             client = self.client()
             #Prepare Request Metadata
             # TODO:Replace with config 
@@ -52,37 +52,49 @@ class Job():
             # Create a single job. If no file arg is provided a job string is required as input.
             if file is None:
                 try:
-                    logger.debug("create_job: Parsing job string: {}".format(input_job))
-                    # job_json = json.loads(input_job)
-                    # company_id = job_json['company']
                     company_id = input_job['company']
-                    parsed_job = cts_helper.parse_job(project_id=project_id,tenant_id=tenant_id,jobs=[input_job])
-                    if parsed_job is None:
-                        raise UnparseableJobError
-                    parent = cts_helper.get_parent(project_id,tenant_id)
-                    logger.debug("create_job: Parent is set to {}".format(parent))
-
-                except UnparseableJobError as e:
-                    logger.error("Unable to parse the input job string.")
-                else:
-                    try:
+                    external_id = input_job['requisition_id']
+                    language = input_job['language_code']
+                    existing_job = self.get_job(project_id=project_id,company_id=company_id,\
+                        tenant_id=tenant_id,external_id=external_id,languages=language,\
+                            scope='limited')
+                    if existing_job is not None:
+                        print("Job requisition ID {} already exists for the given parameters.".format(external_id))
+                        logger.debug("Job requisition ID {} already exists for the given parameters.".format(external_id))
+                    else:
+                        logger.debug("create_job: Parsing job string: {}".format(input_job))
+                        parsed_job = cts_helper.parse_job(project_id=project_id,tenant_id=tenant_id,jobs=[input_job])[0]
+                        if parsed_job is None:
+                            raise UnparseableJobError
+                        parent = cts_helper.get_parent(project_id,tenant_id)
+                        logger.debug("create_job: Parent is set to {}".format(parent))
                         logger.debug("Posting parsed job {}".format(parsed_job))
-                        new_job = client.create_job(parent,parsed_job[0],metadata=[job_req_metadata])
+                        new_job = client.create_job(parent,parsed_job,metadata=[job_req_metadata])
                         if new_job is not None:
                             if cts_helper.persist_to_db(object=new_job,project_id=project_id,tenant_id=tenant_id,company_id=company_id):
-                                # print ("Created job requisition ID {} for company {}.".format(job_json.requisition_id,company_id))
                                 print ("Created job requisition ID {} for company {}.".format(input_job.requisition_id,company_id))
                         else:
                             raise
-                    except AlreadyExists as e:
-                        #TODO: Sync with DB if it doesn't exist in DB
-                        logger.error("Job already exists. Message: {}".format(e))
-                    except ValueError:
-                        logger.error("Invalid Parameters")
-                    except GoogleAPICallError as e:
-                        logger.error("API error when creating job. Message: {}".format(e))
-                    except Exception as e:
-                        logger.error("Error when creating job. Message: {}".format(e))
+                        
+                except UnparseableJobError as e:
+                    logger.error("Unable to parse the input job string.")
+                except AlreadyExists as e:
+                    # Sync with DB if it doesn't exist in DB
+                    logger.warning("Job already exists. Message: {}".format(e))
+                    logger.warning("Local DB out of sync. Syncing local db..")
+                    sync_job_name = re.search("^Job (.*) already exists.*$",e.message).group(1)
+                    sync_job = client.get_job(sync_job_name)
+                    if cts_helper.persist_to_db(sync_job,project_id=project_id,tenant_id=tenant_id,company_id=company_id):
+                        logger.warning("Job requisition ID {} for company {} synced to DB.".format(parsed_job['requisition_id'],\
+                            company_id))
+                    else:
+                        raise
+                except ValueError:
+                    logger.error("Invalid Parameters")
+                except GoogleAPICallError as e:
+                    logger.error("API error when creating job. Message: {}".format(e))
+                except Exception as e:
+                    logger.error("Error when creating job. Message: {}".format(e))
 
             # Create a batch of jobs. Job strings are provided in a new line delimited JSON file as input.
             else:                
@@ -224,7 +236,7 @@ class Job():
                 else:
                     logger.debug("db lookup:{}".format(rows))
                     if scope=='limited':
-                        jobs = [Job(name=row[0],requisition_id=row[1],language_code=row[2],company=row[4]) for row in rows]
+                        jobs = [Job(name=row[0],requisition_id=row[1],language_code=row[2],company=row[3]) for row in rows]
                         logger.debug("Returning Jobs count: {}".format(len(jobs)))
                     else:
                         jobs = [client.get_job(row[0]) for row in rows]
