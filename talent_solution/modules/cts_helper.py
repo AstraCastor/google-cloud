@@ -11,7 +11,7 @@ from res import config
 
 from google.cloud.talent_v4beta1.proto.common_pb2 import CustomAttribute
 from google.protobuf.timestamp_pb2 import Timestamp
-from google.cloud.talent_v4beta1.types import Job as talent_job
+from google.cloud.talent_v4beta1.types import Job as CTS_Job
 
 #Get the root logger
 logger = logging.getLogger()
@@ -139,7 +139,7 @@ def generate_file_batch(file,rows=5,concurrent_batches=1):
 def persist_to_db(object,project_id,tenant_id=None,company_id=None):
     try:
         db = cts_db.DB().connection
-        if isinstance(object,talent_job):
+        if isinstance(object,CTS_Job):
             job = object
             external_id = job.requisition_id
             language = job.language_code
