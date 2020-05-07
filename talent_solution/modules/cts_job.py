@@ -98,73 +98,100 @@ class Job():
 
             # Create a batch of jobs. Job strings are provided in a new line delimited JSON file as input.
             else:                
-                job_parent = client.tenant_path(project_id,tenant_id)
                 if os.path.exists(file):
                     logger.debug("Reading input file from {}".format(file))
                     #TODO: Replace with a config param
                     batch_size = 5
-                    logger.debug("Batching the file {} to be posted...".format(file))
 
                     def operation_complete(operation_future):
                         try:
                             # print("Size of operation after callback: {}".format(sys.getsizeof(operation)))
-                            if operation_future in batch_ops.values(): 
+                            # if operation_future in batch_ops.values(): 
                                 print ("operation_future in batch_ops.values() is True")
                                 print ("Metadata is {}".format(operation_future.metadata))
                                 print ("State is {}".format(operation_future.metadata.state))
                                 print ("Op name is: {}".format(operation_future.operation.name))
+                                print ("Operation Future dir is: {}".format(dir(operation_future)))
+                                operation = operation_future.operation
                                 # if operation_future.metadata.state==3:
-                                if operation_future.done and operation_future.error is None:
+                                if operation_future.done and operation.error is None:
                                     print ("operation_future.metadata.state==3 (SUCCEEDED) is True")
                                     op_result = operation_future.result()
                                     for id,op in batch_ops.items():
                                         if op == operation_future:
                                             batch_id = id 
-                                    logger.debug("Batch ID {} results:\n{}".format(batch_id,op_result))
-                            else:
-                                raise AttributeError 
-                        except AttributeError as e:
-                            logger.error("Unknown Batch Operation")   
+                                    logger.debug("Batch ID {} results:\n".format(batch_id))
+                                    for job in op_result:
+                                        cts_helper.persist_to_db(job,project_id=project_id,tenant_id=tenant_id,company_id=company_id)
+                                        logger.debug("Job {} created.".format(job.requisition_id))
+                                elif operation.error:
+                                    raise Exception(operation.error)
+                            # else:
+                            #     raise AttributeError 
+                        # except AttributeError as e:
+                        #     logger.error("Unknown Batch Operation")   
                         except Exception as e:
                             logger.error("Error when creating jobs. Message: {}".format(e),exc_info=config.LOGGING['traceback'])
 
+                    logger.debug("Batching the file to be posted...")
                     # Generate the batches to be posted
                     batch_ops = {}
+                    batch_errors={}
                     for concurrent_batch in cts_helper.generate_file_batch(file=file,rows=batch_size,concurrent_batches=1):
                         for batch in concurrent_batch:
                             try:
                                 batch_id,jobs = batch.popitem()
+                                batch_errors[batch_id]=[]
+                                # Check each job in the batch exists already and remove it from the batch
+                                for job in jobs:
+                                    job_json = json.loads(job)
+                                    company_id = job_json['company']
+                                    external_id = job_json['requisition_id']
+                                    language=job_json['language_code']
+                                    if self.get_job(project_id=project_id,company_id=company_id,tenant_id=tenant_id,\
+                                        external_id=external_id,languages=language,scope='limited'):
+                                        jobs.remove(job) 
+
                                 logger.debug("Batch {}: Parsing {} jobs".format(batch_id,len(jobs)))
                                 parsed_jobs = cts_helper.parse_job(project_id=project_id,tenant_id=tenant_id,jobs=jobs)
                                 if parsed_jobs is None:
                                     raise UnparseableJobError
+                                
                                 parent = cts_helper.get_parent(project_id,tenant_id)
                                 logger.debug("Batch {}: Parent is set to {}".format(batch_id,parent))
 
+                                logger.debug("Batch {}: Posting lines {} to {}".format(batch_id,((batch_id-1)*batch_size+1),\
+                                    ((batch_id-1)*batch_size)+batch_size))
+                                # batch_req = client.batch_create_jobs(parent,parsed_jobs,metadata=[job_req_metadata])
+                                batch_ops[batch_id]= client.batch_create_jobs(parent,parsed_jobs,metadata=[job_req_metadata])
+                                # print ("Operation outside name is: {}".format(batch_ops[batch_id].operation.name))
+                                batch_ops[batch_id].add_done_callback(operation_complete)
+                                # logger.debug("---------------- Batch {} ({} Jobs) --------------".format(batch_id,len(parsed_jobs)))
+
                             except UnparseableJobError as e:
+                                batch_errors[batch_id].append({"message":"Unable to parse one or more jobs between lines {} and {}".format(\
+                                    ((batch_id-1)*batch_size+1),((batch_id-1)*batch_size)+batch_size),"jobs":e
+                                    })
                                 logger.warning("Batch {}: Unable to parse one or more jobs between lines {} and {}".format(batch_id,\
                                     ((batch_id-1)*batch_size+1),((batch_id-1)*batch_size)+batch_size))
-                            else:
-                                try:
-                                    logger.debug("Batch {}: Posting lines {} to {}".format(batch_id,((batch_id-1)*batch_size+1),\
-                                        ((batch_id-1)*batch_size)+batch_size))
-                                    # batch_req = client.batch_create_jobs(parent,parsed_jobs,metadata=[job_req_metadata])
-                                    batch_ops[batch_id]= client.batch_create_jobs(parent,parsed_jobs,metadata=[job_req_metadata])
-                                    print ("Operation outside name is: {}".format(batch_ops[batch_id].operation.name))
-                                    batch_ops[batch_id].add_done_callback(operation_complete)
-                                    # logger.debug("---------------- Batch {} ({} Jobs) --------------".format(batch_id,len(parsed_jobs)))
-                                except RetryError as e:
-                                    logger.error("Batch {}: API Retry failed due to {}.".format(batch_id,e),\
-                                        exc_info=config.LOGGING['traceback'])
-                                except GoogleAPICallError as e:
-                                    logger.error("Batch {}: CTS API Error due to {}".format(batch_id,e),\
-                                        exc_info=config.LOGGING['traceback'])
+                            except RetryError as e:
+                                batch_errors[batch_id].append({"message":"API Retry failed due to {}.".format(e)})
+                                logger.error("Batch {}: API Retry failed due to {}.".format(batch_id,e),\
+                                    exc_info=config.LOGGING['traceback'])
+                            except GoogleAPICallError as e:
+                                batch_errors[batch_id].append({"message":"API Retry failed due to {}.".format(e)})
+                                logger.error("Batch {}: CTS API Error due to {}".format(batch_id,e),\
+                                    exc_info=config.LOGGING['traceback'])
 
                     for id,op in batch_ops.items():
                         while not op.done():
                            logger.debug("Waiting on batch {}".format(id))
                            time.sleep(3)
                         print("Batch ID {} Status: {}".format(batch_id,batch_ops[batch_id].metadata.state))
+
+                    if batch_errors.values():
+                        raise Exception(batch_errors)
+
                 else:
                     raise FileNotFoundError("Missing input file.")
 
@@ -174,8 +201,7 @@ class Job():
             else:
                 logger.error("Error creating job from file {}. Message: {}".format(file,e),exc_info=config.LOGGING['traceback'])
             # self.delete_job(project_id,tenant_id,job_string.external_id,forced=True)
-
-            raise
+            raise e
                    
 
     def update_job(self,tenant_id,project_id=None,job=None,file=None):
