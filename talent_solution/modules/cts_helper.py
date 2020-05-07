@@ -71,25 +71,54 @@ def parse_job(project_id,tenant_id,jobs=[]):
         parsed_batch = []
         #Parse the jobs now
         for job in job_batch:
-            job['company']=[company.name for company in companies if job['company']==company.external_id].pop()
-            job['promotion_value']=int(job['promotion_value'])
-            job['job_start_time']=Timestamp(seconds=int(job['job_start_time']))
-            job['job_end_time']=Timestamp(seconds=int(job['job_end_time']))
-            job['posting_publish_time']=Timestamp(seconds=int(job['posting_publish_time']))
-            job['posting_expire_time']=Timestamp(seconds=int(job['posting_expire_time']))
-            for attr in job['custom_attributes']:
-                # job['custom_attributes'][key]=CustomAttribute(string_values=[job['custom_attributes'][key]['string_values'][0]],filterable=True)
-                if 'string_values' in job['custom_attributes'][attr]:
-                    job['custom_attributes'][attr]=CustomAttribute(string_values=job['custom_attributes'][attr]['string_values'],filterable=job['custom_attributes'][attr]['filterable'])
-                elif 'long_values' in job['custom_attributes'][attr]:
-                    job['custom_attributes'][attr]=CustomAttribute(long_values=job['custom_attributes'][attr]['long_values'],filterable=job['custom_attributes'][attr]['filterable'])
+            errors = {}
+            try:
+                # Mandatory fields
+                if "requisition_id" not in job:
+                    raise UnparseableJobError("Missing requisition ID for job {}".format(job))
+                if "title" not in job or job['title'] is "":
+                    raise UnparseableJobError("Missing job title for job requisition ID {}".format(job['requisition_id']))                
+                if "description" not in job or job['description'] is "":
+                    raise UnparseableJobError("Missing job description for job requisition ID {}".format(job['requisition_id']))
+                if "company" in job:
+                    job['company']=[company.name for company in companies if job['company']==company.external_id].pop()
                 else:
-                    raise UnparseableJobError
-            parsed_batch.append(job)
-        
-    except UnparseableJobError:
-        logger.error("Passed job string is not a valid Job JSON. Error when parsing:\n {}".format(job),\
-            exc_info=config.LOGGING['traceback'])
+                    raise UnparseableJobError("Missing company ID for job requisition ID {}".format(job['requisition_id']))
+                if "language_code" not in job:
+                    raise UnparseableJobError("Missing language code for job requisition ID {}".format(job['requisition_id']))
+                # Optional fields parsing
+                # The rest of the fields are string fields or repeated fields. If the format doesn't match the whole job will be rejected by CTS.
+                if "promotion_value" in job:
+                   job['promotion_value']=int(job['promotion_value'])
+                if "job_start_time" in job:
+                    job['job_start_time']=Timestamp(seconds=int(job['job_start_time']))
+                if "job_end_time" in job:
+                    job['job_end_time']=Timestamp(seconds=int(job['job_end_time']))
+                if "posting_publish_time" in job:
+                    job['posting_publish_time']=Timestamp(seconds=int(job['posting_publish_time']))
+                if "posting_expire_time" in job:
+                    job['posting_expire_time']=Timestamp(seconds=int(job['posting_expire_time']))
+                for attr in job['custom_attributes']:
+                    # job['custom_attributes'][key]=CustomAttribute(string_values=[job['custom_attributes'][key]['string_values'][0]],filterable=True)
+                    if 'string_values' in job['custom_attributes'][attr]:
+                        if job['custom_attributes'][attr]['string_values'] != [""] and job['custom_attributes'][attr]['string_values'] is not None:
+                            job['custom_attributes'][attr]=CustomAttribute(string_values=job['custom_attributes'][attr]['string_values'],filterable=job['custom_attributes'][attr]['filterable'])
+                        else: 
+                            continue
+                    elif 'long_values' in job['custom_attributes'][attr]:
+                        if job['custom_attributes'][attr]['string_values'] != [""] and job['custom_attributes'][attr]['string_values'] is not None:
+                            job['custom_attributes'][attr]=CustomAttribute(long_values=job['custom_attributes'][attr]['long_values'],filterable=job['custom_attributes'][attr]['filterable'])
+                        else: 
+                            continue
+                    else:
+                        raise UnparseableJobError("Error parsing custom attribute {} for job requisition ID {}.".format(attr,job['requisition_id']))
+                parsed_batch.append(job)
+            except UnparseableJobError as e:
+                errors[job]=e
+                # logger.error("Passed job string is not a valid Job JSON. Error when parsing:\n {}".format(job),\
+                #         exc_info=config.LOGGING['traceback'])
+        if errors:
+            raise UnparseableJobError(errors)
     except Exception as e:
         logger.error("Error occured when parsing job string:\n {}".format(job),exc_info=config.LOGGING['traceback'])
     else:
