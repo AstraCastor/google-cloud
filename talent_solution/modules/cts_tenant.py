@@ -92,7 +92,8 @@ class Tenant:
                 logger.info("Tenant {} created.\n{}".format(external_id,new_tenant))
                 return new_tenant
             else:
-                logger.error("Tenant {} already exists.\n{}".format(external_id,existing_tenant),exc_info=config.LOGGING['traceback'])
+                logger.warning("Tenant {} already exists.\n{}".format(external_id,existing_tenant))
+                print("Tenant {} already exists.\n{}".format(external_id,existing_tenant))
                 return None
         except Exception as e:
             logger.error("Error creating tenant {}: {}".format(external_id,e),exc_info=config.LOGGING['traceback'])
@@ -134,31 +135,6 @@ class Tenant:
         except Exception as e:
             logger.error("Error deleting tenant {}: {}".format(external_id,e),exc_info=config.LOGGING['traceback'])
             raise
-
-    # def sync_tenants(self,project_id):
-    #     db = cts_db.DB().connection
-    #     client = self.client()
-    #     try:
-    #         db.execute("SELECT sync_time FROM metadata where table='tenant'")
-    #         last_sync =  db.fetchall()
-
-    #         db.execute("SELECT * FROM tenant")
-    #         tenants_from_db = db.fetchall()
-    #         print ("DB tenants:\n {}".format(tenants_from_db))
-            
-    #         parent = client.project_path(project_id)
-    #         tenants_from_cloud = list(client.list_tenants(parent))
-    #         # tenants_from_cloud = list(tenant for tenant in tenants)
-
-    #         tenants_delta = [tenant for tenant in tenants_from_cloud if tenant['external_id'] not in tenants_from_db['external_id']]
-    #         print ("Delta is: \n{}".format(tenants_delta))
-    #         if tenants_delta is not None:
-    #             for t in tenants_delta:
-    #                 db.execute("INSERT INTO tenant VALUES \({},{},{},{}\)".format(t.external_id,t.tenant_name,1,datetime.now()))
-    #                 logging.info("Inserted tenant record for {}".format(t.external_id))
-    #     except Exception as e:
-    #         print("Error when syncing tenants in project {}. Message: {}".format(project_id, e))
-    #         raise
 
     if __name__ == '__main__':
         Tenant()
