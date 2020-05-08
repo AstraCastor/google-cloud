@@ -98,18 +98,18 @@ def parse_job(project_id,tenant_id,jobs=[]):
                     job['posting_publish_time']=Timestamp(seconds=int(job['posting_publish_time']))
                 if "posting_expire_time" in job:
                     job['posting_expire_time']=Timestamp(seconds=int(job['posting_expire_time']))
-                for attr in job['custom_attributes']:
+                for attr in list(job['custom_attributes']):
                     # job['custom_attributes'][key]=CustomAttribute(string_values=[job['custom_attributes'][key]['string_values'][0]],filterable=True)
                     if 'string_values' in job['custom_attributes'][attr]:
                         if job['custom_attributes'][attr]['string_values'] != [""] and job['custom_attributes'][attr]['string_values'] is not None:
                             job['custom_attributes'][attr]=CustomAttribute(string_values=job['custom_attributes'][attr]['string_values'],filterable=job['custom_attributes'][attr]['filterable'])
                         else: 
-                            continue
+                            del(job['custom_attributes'][attr])
                     elif 'long_values' in job['custom_attributes'][attr]:
                         if job['custom_attributes'][attr]['string_values'] != [""] and job['custom_attributes'][attr]['string_values'] is not None:
                             job['custom_attributes'][attr]=CustomAttribute(long_values=job['custom_attributes'][attr]['long_values'],filterable=job['custom_attributes'][attr]['filterable'])
                         else: 
-                            continue
+                            del(job['custom_attributes'][attr])
                     else:
                         raise UnparseableJobError("Error parsing custom attribute {} for job requisition ID {}.".format(attr,job['requisition_id']))
                 parsed_batch.append(job)
