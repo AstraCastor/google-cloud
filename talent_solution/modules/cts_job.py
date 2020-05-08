@@ -101,9 +101,11 @@ class Job():
                 if os.path.exists(file):
                     logger.debug("Reading input file from {}".format(file))
                     #TODO: Replace with a config param
-                    batch_size = 5
+                    batch_size = 1
+                    total_jobs_created=0
 
                     def operation_complete(operation_future):
+                        nonlocal total_jobs_created
                         try:
                             # print("Size of operation after callback: {}".format(sys.getsizeof(operation)))
                             # if operation_future in batch_ops.values(): 
@@ -125,9 +127,11 @@ class Job():
                                 print(op_result)
                                 print (dir(op_result))
                                 print (type(op_result.job_results))
+                                job_count = 0
                                 for result in op_result.job_results:
                                     cts_helper.persist_to_db(result.job,project_id=project_id,tenant_id=tenant_id,company_id=company_id)
                                     logger.debug("Job {} created.".format(result.job.requisition_id))
+                                    job_count += 1
                                 # elif operation.error:
                                 #     raise Exception(operation.error)
                             # else:
@@ -136,6 +140,10 @@ class Job():
                         #     logger.error("Unknown Batch Operation")   
                         except Exception as e:
                             logger.error("Error when creating jobs. Message: {}".format(e),exc_info=config.LOGGING['traceback'])
+                        else:
+                            print("Batch {}: {} jobs created.".format(batch_id,job_count))
+                            logger.debug("Batch {}: {} jobs created.".format(batch_id,job_count))
+                            total_jobs_created += job_count
 
                     logger.debug("Batching the file to be posted...")
                     # Generate the batches to be posted
@@ -201,7 +209,8 @@ class Job():
                         while not op.done():
                            logger.debug("Waiting on batch {}".format(id))
                            time.sleep(3)
-                        print("Batch ID {} Status: {}".format(batch_id,batch_ops[batch_id].metadata.state))
+                        logger.debug("Batch ID {} Status: {}".format(batch_id,batch_ops[batch_id].metadata.state))
+                    print("Total Jobs created: {}".format(total_jobs_created))
                     for errors in batch_errors.values():
                         if errors:
                             raise Exception(batch_errors)
