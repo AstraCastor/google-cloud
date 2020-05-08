@@ -114,18 +114,22 @@ class Job():
                                 print ("Operation Future dir is: {}".format(dir(operation_future)))
                                 operation = operation_future.operation
                                 # if operation_future.metadata.state==3:
-                                if operation_future.done and operation.error is None:
-                                    print ("operation_future.metadata.state==3 (SUCCEEDED) is True")
-                                    op_result = operation_future.result()
-                                    for id,op in batch_ops.items():
-                                        if op == operation_future:
-                                            batch_id = id 
-                                    logger.debug("Batch ID {} results:\n".format(batch_id))
-                                    for job in op_result:
-                                        cts_helper.persist_to_db(job,project_id=project_id,tenant_id=tenant_id,company_id=company_id)
-                                        logger.debug("Job {} created.".format(job.requisition_id))
-                                elif operation.error:
-                                    raise Exception(operation.error)
+                                # if operation_future.done and operation.error is None:
+                                # if operation_future.done:
+                                #     print ("operation_future.metadata.state==3 (SUCCEEDED) is True")
+                                op_result = operation_future.result()
+                                for id,op in batch_ops.items():
+                                    if op == operation_future:
+                                        batch_id = id 
+                                logger.debug("Batch ID {} results:\n".format(batch_id))
+                                print(op_result)
+                                print (dir(op_result))
+                                print (type(op_result.job_results))
+                                for result in op_result.job_results:
+                                    cts_helper.persist_to_db(result.job,project_id=project_id,tenant_id=tenant_id,company_id=company_id)
+                                    logger.debug("Job {} created.".format(result.job.requisition_id))
+                                # elif operation.error:
+                                #     raise Exception(operation.error)
                             # else:
                             #     raise AttributeError 
                         # except AttributeError as e:
@@ -142,31 +146,41 @@ class Job():
                             try:
                                 batch_id,jobs = batch.popitem()
                                 batch_errors[batch_id]=[]
+                                starting_line = (batch_id-1)*batch_size+1
+                                ending_line = (batch_id-1)*batch_size
                                 # Check each job in the batch exists already and remove it from the batch
-                                for job in jobs:
-                                    job_json = json.loads(job)
-                                    company_id = job_json['company']
-                                    external_id = job_json['requisition_id']
-                                    language=job_json['language_code']
+                                for job in list(jobs):
+                                    try:
+                                        ending_line += 1 
+                                        job_json = json.loads(job)
+                                        company_id = job_json['company']
+                                        external_id = job_json['requisition_id']
+                                        language=job_json['language_code']
+                                    except AttributeError as e:
+                                        raise UnparseableJobError(e)
+                                    # Remove the already existing jobs
                                     if self.get_job(project_id=project_id,company_id=company_id,tenant_id=tenant_id,\
                                         external_id=external_id,languages=language,scope='limited'):
+                                        print("Skipping existing job on line {}".format(ending_line))
                                         jobs.remove(job) 
-
-                                logger.debug("Batch {}: Parsing {} jobs".format(batch_id,len(jobs)))
-                                parsed_jobs = cts_helper.parse_job(project_id=project_id,tenant_id=tenant_id,jobs=jobs)
+                                # If Jobs got cleared out completely, skip the batch altogether
+                                # else parse the remaining jobs in the batch
+                                if not jobs:
+                                    print("All jobs between lines {} - {} exist already.".format(starting_line,ending_line))
+                                    logger.debug("All jobs in batch {} exist already.".format(batch_id))
+                                    continue
+                                else:
+                                    logger.debug("Batch {}: Parsing {} jobs".format(batch_id,len(jobs)))
+                                    parsed_jobs = cts_helper.parse_job(project_id=project_id,tenant_id=tenant_id,jobs=jobs)
                                 if parsed_jobs is None:
                                     raise UnparseableJobError
                                 
+                                # Getting ready to post the batch: get the parent
                                 parent = cts_helper.get_parent(project_id,tenant_id)
                                 logger.debug("Batch {}: Parent is set to {}".format(batch_id,parent))
-
-                                logger.debug("Batch {}: Posting lines {} to {}".format(batch_id,((batch_id-1)*batch_size+1),\
-                                    ((batch_id-1)*batch_size)+batch_size))
-                                # batch_req = client.batch_create_jobs(parent,parsed_jobs,metadata=[job_req_metadata])
+                                logger.debug("Batch {}: Posting {} jobs between lines {} to {}".format(batch_id,len(parsed_jobs),starting_line,ending_line))
                                 batch_ops[batch_id]= client.batch_create_jobs(parent,parsed_jobs,metadata=[job_req_metadata])
-                                # print ("Operation outside name is: {}".format(batch_ops[batch_id].operation.name))
                                 batch_ops[batch_id].add_done_callback(operation_complete)
-                                # logger.debug("---------------- Batch {} ({} Jobs) --------------".format(batch_id,len(parsed_jobs)))
 
                             except UnparseableJobError as e:
                                 batch_errors[batch_id].append({"message":"Unable to parse one or more jobs between lines {} and {}".format(\
@@ -188,10 +202,9 @@ class Job():
                            logger.debug("Waiting on batch {}".format(id))
                            time.sleep(3)
                         print("Batch ID {} Status: {}".format(batch_id,batch_ops[batch_id].metadata.state))
-
-                    if batch_errors.values():
-                        raise Exception(batch_errors)
-
+                    for errors in batch_errors.values():
+                        if errors:
+                            raise Exception(batch_errors)
                 else:
                     raise FileNotFoundError("Missing input file.")
 
@@ -207,8 +220,57 @@ class Job():
     def update_job(self,tenant_id,project_id=None,job=None,file=None):
         print ("update job") if file is None else print ("batch update job")
     
-    def delete_job(self,project_id,tenant_id=None,external_id=None,all=False,forced=False):
-        print ("delete job") if all is False else print ("batch create job")
+    # def delete_job(self,project_id,tenant_id=None,company_id=None,external_id=None,language="en-US",forced=False,all=False,file=None):
+    #     """ Delete a CTS company by external name.
+    #     Args:
+    #         project_id: project where the company will be created - string
+    #         external_id: unique ID of the company - string
+    #     Returns:
+    #         None - If company is not found.
+    #     """
+    #     logger.debug("CALLED: delete_job({},{},{},{},{},{},{},{} by {})".format(project_id,tenant_id,company_id,\
+    #         external_id,language,all,forced,file,inspect.currentframe().f_back.f_code.co_name))
+    #     try:
+    #         db = cts_db.DB().connection
+    #         client = self.client()  
+    #         if forced:
+    #             # Get all the jobs for a company from the server directly - get_job(all,scope=full) gets everything from the server directly
+    #             all_jobs = self.get_job(project_id=project_id,tenant_id=tenant_id,company_id=company_id, status='ALL', all=True)
+    #             logger.debug("Total jobs retrieved: {}".format(len(all_jobs)))
+    #             if external_id is not None:
+    #                 pass
+
+    #             if len(all_jobs) != 0:
+    #                 for job in all_companies:
+    #                     if company.external_id == external_id:
+    #                         existing_company = company
+    #                         break
+    #                     else:
+    #                         existing_company = None
+    #             else:
+    #                 existing_company = None
+    #         else:
+    #             logger.debug("{}:Calling get_company({},{},{})".format(inspect.currentframe().f_code.co_name,project_id,\
+    #                 tenant_id,external_id))
+    #             existing_company = self.get_company(project_id=project_id,tenant_id=tenant_id,external_id=external_id)
+    #             logger.debug("{}:Existing company? {}".format(inspect.currentframe().f_code.co_name,existing_company))
+    #         if existing_company is not None:
+    #             logger.info("Deleting company id: {}".format(existing_company[0].external_id))
+    #             client.delete_company(existing_company[0].name)
+    #             db.execute("DELETE FROM company where company_name = ?",(existing_company[0].name,))
+    #             logger.info("Company {} deleted.".format(external_id))
+    #             print("Company {} deleted.".format(external_id))
+
+    #         else:
+    #             logger.error("{}: Company {} does not exist.".format(inspect.currentframe().f_code.co_name,external_id),\
+    #                 exc_info=config.LOGGING['traceback'])
+    #             print("Company {} does not exist.".format(external_id))
+    #             return None
+    #     except Exception as e:
+    #         logger.error("{}:Error deleting company {}: {}".format(inspect.currentframe().f_code.co_name,external_id,e),\
+    #             exc_info=config.LOGGING['traceback'])
+    #         raise
+
 
     def get_job(self,project_id,company_id,tenant_id=None,external_id=None,languages='en',status='OPEN',all=False,scope='full'):
         """ Get CTS job by name or get all CTS jobs by project.
@@ -268,7 +330,7 @@ class Job():
                         jobs = [client.get_job(row[0]) for row in rows]
                         logger.debug("Returning Jobs count: {}".format(len(jobs)))
                     return jobs
-            else:
+            elif all:
                 # LIST operation
                 # Calculate the parent path : Get tenant name if tenant ID was provided, if not default tenant under the 
                 # given project.
