@@ -101,7 +101,10 @@ class Job():
                 if os.path.exists(file):
                     logger.debug("Reading input file from {}".format(file))
                     #TODO: Replace with a config param
-                    batch_size = 1
+                    batch_size = 2
+                    #TODO: Replace with a batch_info object to unify all the batch output metrics.
+                    # batch_info[batch_id]={"start":starting_line,"end":ending_line,"input":"","posted":"",\
+                    # "operation":"","created":"","errors":[]}
                     total_jobs_created=0
 
                     def operation_complete(operation_future):
@@ -124,20 +127,16 @@ class Job():
                                     if op == operation_future:
                                         batch_id = id 
                                 logger.debug("Batch ID {} results:\n".format(batch_id))
-                                print(op_result)
-                                print (dir(op_result))
-                                print (type(op_result.job_results))
                                 job_count = 0
                                 for result in op_result.job_results:
-                                    cts_helper.persist_to_db(result.job,project_id=project_id,tenant_id=tenant_id,company_id=company_id)
-                                    logger.debug("Job {} created.".format(result.job.requisition_id))
-                                    job_count += 1
-                                # elif operation.error:
-                                #     raise Exception(operation.error)
-                            # else:
-                            #     raise AttributeError 
-                        # except AttributeError as e:
-                        #     logger.error("Unknown Batch Operation")   
+                                    if result.job.requisition_id is not None and result.job.requisition_id is not "":
+                                        cts_helper.persist_to_db(result.job,project_id=project_id,tenant_id=tenant_id,company_id=company_id)
+                                        logger.debug("Job {} created.".format(result.job.requisition_id))
+                                        job_count += 1
+                                    else:
+                                        error_row = (batch_id-1)*batch_size+list(op_result.job_results).index(result)+1
+                                        print ("Error when creating job in row {}".format(error_row))
+                                        logger.warning("Error when creating job in row {}".format(error_row))  
                         except Exception as e:
                             logger.error("Error when creating jobs. Message: {}".format(e),exc_info=config.LOGGING['traceback'])
                         else:
@@ -170,7 +169,7 @@ class Job():
                                     if self.get_job(project_id=project_id,company_id=company_id,tenant_id=tenant_id,\
                                         external_id=external_id,languages=language,scope='limited'):
                                         print("Skipping existing job on line {}".format(ending_line))
-                                        jobs.remove(job) 
+                                        jobs.remove(job)
                                 # If Jobs got cleared out completely, skip the batch altogether
                                 # else parse the remaining jobs in the batch
                                 if not jobs:
@@ -192,10 +191,10 @@ class Job():
 
                             except UnparseableJobError as e:
                                 batch_errors[batch_id].append({"message":"Unable to parse one or more jobs between lines {} and {}".format(\
-                                    ((batch_id-1)*batch_size+1),((batch_id-1)*batch_size)+batch_size),"jobs":e
+                                    starting_line,ending_line),"jobs":e
                                     })
                                 logger.warning("Batch {}: Unable to parse one or more jobs between lines {} and {}".format(batch_id,\
-                                    ((batch_id-1)*batch_size+1),((batch_id-1)*batch_size)+batch_size))
+                                    starting_line,ending_line))
                             except RetryError as e:
                                 batch_errors[batch_id].append({"message":"API Retry failed due to {}.".format(e)})
                                 logger.error("Batch {}: API Retry failed due to {}.".format(batch_id,e),\
@@ -207,9 +206,10 @@ class Job():
 
                     for id,op in batch_ops.items():
                         while not op.done():
-                           logger.debug("Waiting on batch {}".format(id))
-                           time.sleep(3)
-                        logger.debug("Batch ID {} Status: {}".format(batch_id,batch_ops[batch_id].metadata.state))
+                            logger.debug("Waiting on batch {}".format(id))
+                            time.sleep(3)
+                        logger.debug("Batch ID {} Status: {}".format(id,batch_ops[id].metadata.state))
+
                     print("Total Jobs created: {}".format(total_jobs_created))
                     for errors in batch_errors.values():
                         if errors:
@@ -222,7 +222,6 @@ class Job():
                 logger.error("Error creating job:\n{}\nMessage:{}".format(input_job,e),exc_info=config.LOGGING['traceback'])
             else:
                 logger.error("Error creating job from file {}. Message: {}".format(file,e),exc_info=config.LOGGING['traceback'])
-            # self.delete_job(project_id,tenant_id,job_string.external_id,forced=True)
             raise e
                    
 
