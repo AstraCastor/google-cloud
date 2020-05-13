@@ -217,6 +217,10 @@ class Job():
                 else:
                     raise FileNotFoundError("Missing input file.")
 
+        except ValueError:
+            logger.error("Invalid Parameters")
+        except GoogleAPICallError as e:
+            logger.error("API error when creating job. Message: {}".format(e))
         except Exception as e:
             if input_job:
                 logger.error("Error creating job:\n{}\nMessage:{}".format(input_job,e),exc_info=config.LOGGING['traceback'])
@@ -228,56 +232,62 @@ class Job():
     def update_job(self,tenant_id,project_id=None,job=None,file=None):
         print ("update job") if file is None else print ("batch update job")
     
-    # def delete_job(self,project_id,tenant_id=None,company_id=None,external_id=None,language="en-US",forced=False,all=False,file=None):
-    #     """ Delete a CTS company by external name.
-    #     Args:
-    #         project_id: project where the company will be created - string
-    #         external_id: unique ID of the company - string
-    #     Returns:
-    #         None - If company is not found.
-    #     """
-    #     logger.debug("CALLED: delete_job({},{},{},{},{},{},{},{} by {})".format(project_id,tenant_id,company_id,\
-    #         external_id,language,all,forced,file,inspect.currentframe().f_back.f_code.co_name))
-    #     try:
-    #         db = cts_db.DB().connection
-    #         client = self.client()  
-    #         if forced:
-    #             # Get all the jobs for a company from the server directly - get_job(all,scope=full) gets everything from the server directly
-    #             all_jobs = self.get_job(project_id=project_id,tenant_id=tenant_id,company_id=company_id, status='ALL', all=True)
-    #             logger.debug("Total jobs retrieved: {}".format(len(all_jobs)))
-    #             if external_id is not None:
-    #                 pass
+    def delete_job(self,project_id,tenant_id=None,company_id=None,external_id=None,languages="en-US",all=False,forced=False):
+        """ Delete a CTS company by external name.
+        Args:
+            project_id: project where the company will be created - string
+            external_id: unique ID of the company - string
+        Returns:
+            None - If company is not found.
+        """
+        logger.debug("CALLED: delete_job({},{},{},{},{},{},{} by {})".format(project_id,tenant_id,company_id,\
+            external_id,languages,all,forced,inspect.currentframe().f_back.f_code.co_name))
+        try:
+            db = cts_db.DB().connection
+            client = self.client()  
+            if forced:
+                pass
+                # # Get all the jobs for a company from the server directly - get_job(all,scope=full) gets everything from the server directly
+                # all_jobs = self.get_job(project_id=project_id,tenant_id=tenant_id,company_id=company_id, status='ALL', all=True)
+                # logger.debug("Total jobs retrieved: {}".format(len(all_jobs)))
+                # if external_id is not None:
+                #     pass
 
-    #             if len(all_jobs) != 0:
-    #                 for job in all_companies:
-    #                     if company.external_id == external_id:
-    #                         existing_company = company
-    #                         break
-    #                     else:
-    #                         existing_company = None
-    #             else:
-    #                 existing_company = None
-    #         else:
-    #             logger.debug("{}:Calling get_company({},{},{})".format(inspect.currentframe().f_code.co_name,project_id,\
-    #                 tenant_id,external_id))
-    #             existing_company = self.get_company(project_id=project_id,tenant_id=tenant_id,external_id=external_id)
-    #             logger.debug("{}:Existing company? {}".format(inspect.currentframe().f_code.co_name,existing_company))
-    #         if existing_company is not None:
-    #             logger.info("Deleting company id: {}".format(existing_company[0].external_id))
-    #             client.delete_company(existing_company[0].name)
-    #             db.execute("DELETE FROM company where company_name = ?",(existing_company[0].name,))
-    #             logger.info("Company {} deleted.".format(external_id))
-    #             print("Company {} deleted.".format(external_id))
+                # if len(all_jobs) != 0:
+                #     for job in all_companies:
+                #         if company.external_id == external_id:
+                #             existing_company = company
+                #             break
+                #         else:
+                #             existing_company = None
+                # else:
+                #     existing_company = None
+            else:
+                logger.debug("Calling get_job({},{},{},{},{},{})".format(project_id,tenant_id,company_id,external_id,languages,'limited'))
+                existing_jobs = self.get_job(project_id=project_id,company_id=company_id,tenant_id=tenant_id,\
+                    external_id=external_id,languages=languages,scope='limited')
+                logger.debug("Existing job? {}".format(existing_jobs))
+                if existing_jobs:
+                    for job in existing_jobs:
+                        logger.info("Deleting job id {}: {} for company {}".format(job.requisition_id,job.language_code, company_id))
+                        client.delete_job(job.name)
+                        db.execute("DELETE FROM job where job_name = ?",(job.name,))
+                        logger.info("Job {}:{} deleted for company {}.".format(external_id,job.language_code,company_id))
+                        print("Job {}:{} deleted for company {}.".format(external_id,job.language_code,company_id))
+                else:
+                    logger.error("Job {} for company {} does not exist.".format(external_id,company_id),\
+                        exc_info=config.LOGGING['traceback'])
+                    print("Job {} for company {} does not exist.".format(external_id,company_id))
+                    return None
 
-    #         else:
-    #             logger.error("{}: Company {} does not exist.".format(inspect.currentframe().f_code.co_name,external_id),\
-    #                 exc_info=config.LOGGING['traceback'])
-    #             print("Company {} does not exist.".format(external_id))
-    #             return None
-    #     except Exception as e:
-    #         logger.error("{}:Error deleting company {}: {}".format(inspect.currentframe().f_code.co_name,external_id,e),\
-    #             exc_info=config.LOGGING['traceback'])
-    #         raise
+        except ValueError:
+            logger.error("Invalid Parameters")
+        except GoogleAPICallError as e:
+            logger.error("API error when creating job. Message: {}".format(e))        
+        except Exception as e:
+            logger.error("Error deleting job ID {} for company {}. Message: {}".format(external_id,company_id,e),\
+                exc_info=config.LOGGING['traceback'])
+            raise
 
 
     def get_job(self,project_id,company_id,tenant_id=None,external_id=None,languages='en',status='OPEN',all=False,scope='full'):

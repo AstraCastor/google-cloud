@@ -28,7 +28,7 @@ class cts_cli:
 
     def __init__(self):
         #Parse the command
-
+        #TODO: check and correct the help messages
         main_parser = argparse.ArgumentParser(description="Cloud Talent Solution Command Line tool")
 
         subparsers_main = main_parser.add_subparsers(dest="entity",help="An entity such as a company, job, profile or application \
@@ -36,27 +36,29 @@ class cts_cli:
         parser_tenant = subparsers_main.add_parser("tenant",help="Perform operations on a CTS tenant object.")
         parser_company = subparsers_main.add_parser("company",help="Perform operations on a CTS company object.")
         parser_job = subparsers_main.add_parser("job",help="Perform operations on a CTS job object.")
-
+        # Tenant 
         subparsers_tenant = parser_tenant.add_subparsers(dest="operation",help="Tenant operations.")
+        # Tenant Create Parser
         parser_tenant_create = subparsers_tenant.add_parser("create",help="Create a CTS tenant.")
         parser_tenant_create.add_argument("--project_id",help="Project id of the CTS instance.",default=config.APP['gcp_project'])
         parser_tenant_create.add_argument("--external_id",help="Unique human-friendly, external name of the tenant.",required=True)
-
+        # Tenant Delete Parser
         parser_tenant_delete = subparsers_tenant.add_parser("delete",help="Delete a CTS tenant.")
         parser_tenant_delete.add_argument("--project_id",help="Project id of the CTS instance.",default=config.APP['gcp_project'])
         parser_tenant_delete.add_argument("--external_id",help="Unique human-friendly, external name of the tenant.",required=True)
         parser_tenant_delete.add_argument("--forced",help="Force a check on the cloud and delete the tenant. Use this if the client \
             and the cloud are out of sync.",action='store_true')
-
+        # Tenant Show Parser
         parser_tenant_show = subparsers_tenant.add_parser("show",help="Show details of a CTS tenant.")
         parser_tenant_show.add_argument("--project_id",help="Project id of the CTS instance.",default=config.APP['gcp_project'])
         parser_tenant_show.add_argument("--external_id",help="Unique human-friendly, external name of the tenant.",required=True)
-
+        #Tenant List Parser
         parser_tenant_list = subparsers_tenant.add_parser("list",help="List all CTS tenants in a project.")
         parser_tenant_list.add_argument("--project_id",help="Project id of the CTS instance.",default=config.APP['gcp_project'])
 
         # Company Parser
         subparsers_company = parser_company.add_subparsers(dest="operation",help="Company operations.")
+        #Company Create Parser
         parser_company_create = subparsers_company.add_parser("create",help="Create a CTS company.")
         parser_company_create.add_argument("--project_id",help="Project id of the CTS instance.",default=config.APP['gcp_project'])
         parser_company_create.add_argument("--tenant_id",help="Unique human-friendly, external id of the tenant. \
@@ -65,7 +67,7 @@ class cts_cli:
         company_create_mutex_args.add_argument("--company",help="Company object. Mandatory attributes: \
             {\"external_id\":\"<external id>\"}",type=json_loads)
         company_create_mutex_args.add_argument("--file",help="Path to the file to be loaded in batch mode.")
-
+        # Company Delete Parser
         parser_company_delete = subparsers_company.add_parser("delete",help="Delete a CTS company.")
         parser_company_delete.add_argument("--project_id",help="Project id of the CTS instance.",default=config.APP['gcp_project'])
         parser_company_delete.add_argument("--tenant_id",help="Unique human-friendly, external id of the tenant. \
@@ -75,19 +77,20 @@ class cts_cli:
         company_delete_mutex_args.add_argument("--all",help="Unique human-friendly, external name of the tenant.",action='store_true')
         parser_company_delete.add_argument("--forced",help="Force a check on the cloud and delete the tenant. \
             Use this if the client and the cloud are out of sync.",action='store_true')
-
+        # Company Show Parser
         parser_company_show = subparsers_company.add_parser("show",help="Show details of a CTS company.")
         parser_company_show.add_argument("--project_id",help="Project id of the CTS instance.",default=config.APP['gcp_project'])
         parser_company_show.add_argument("--tenant_id",help="Unique human-friendly, external id of the tenant. \
             If not provided, this will be created under default tenant.")
-        parser_company_show.add_argument("--external_id",help="Unique human-friendly, external name of the tenant.",required=True)
-
+        parser_company_show.add_argument("--external_id",help="Unique human-friendly, external name of the company.",required=True)
+        # Company List Parser
         parser_company_list = subparsers_company.add_parser("list",help="List all CTS companies in a tenant.")
         parser_company_list.add_argument("--project_id",help="Project id of the CTS instance.",default=config.APP['gcp_project'])
         parser_company_list.add_argument("--tenant_id",help="Unique human-friendly, external id of the tenant.")
 
         # Job Parser
         subparsers_job = parser_job.add_subparsers(dest="operation",help="Job operations.")
+        # Job Create Parser
         parser_job_create = subparsers_job.add_parser("create",help="Create a CTS job.")
         parser_job_create.add_argument("--project_id",help="Project id of the CTS instance.",default=config.APP['gcp_project'])
         parser_job_create.add_argument("--tenant_id",help="Unique human-friendly, external id of the tenant. \
@@ -97,27 +100,34 @@ class cts_cli:
             {\"external_id\":\"<external id>\"}",type=json_loads)          
         job_create_mutex_args.add_argument("--file",help="Path to the file to be loaded in batch mode.")
 
+        # Job Delete Parser
         parser_job_delete = subparsers_job.add_parser("delete",help="Delete a CTS job.")
         parser_job_delete.add_argument("--project_id",help="Project id of the CTS instance.",default=config.APP['gcp_project'])
         parser_job_delete.add_argument("--tenant_id",help="Unique human-friendly, external id of the tenant. \
             If not provided, this will be created under default tenant.")
+        parser_job_delete.add_argument("--company_id",help="Unique human-friendly, external id of the company.",required=True)
         job_delete_mutex_args = parser_job_delete.add_mutually_exclusive_group(required=True)
         job_delete_mutex_args.add_argument("--external_id",help="Unique human-friendly, external name of the job.")
         job_delete_mutex_args.add_argument("--all",help="Unique human-friendly, external name of the tenant.",action='store_true')
+        parser_job_delete.add_argument("--language",help="BCP-47 Standard language code of the job, such as “en-US” or “sr-Latn”. \
+            If a language code is provided along with the external_id, it will uniquely identify a job listing. Multiple languages \
+                can be provided as a comma separated list. Default: 'en-US'.",default='en-US')
         parser_job_delete.add_argument("--forced",help="Force a check on the cloud and delete the tenant. \
             Use this if the client and the cloud are out of sync.",action='store_true')
 
+        # Job Show Parser
         parser_job_show = subparsers_job.add_parser("show",help="Show details of a CTS job.")
         parser_job_show.add_argument("--project_id",help="Project id of the CTS instance.",default=config.APP['gcp_project'])
         parser_job_show.add_argument("--tenant_id",help="Unique human-friendly, external id of the tenant. \
             If not provided, this will be created under default tenant.")
-        parser_job_show.add_argument("--company_id",help="External id of the company.",required=True)
+        parser_job_show.add_argument("--company_id",help="Unique human-friendly, external id of the company.",required=True)
         parser_job_show.add_argument("--external_id",help="Requisition ID of the job. If a language code is provided along with \
             this, it will uniquely identify a job listing.",required=True)
         parser_job_show.add_argument("--language",help="BCP-47 Standard language code of the job, such as “en-US” or “sr-Latn”. \
             If a language code is provided along with the external_id, it will uniquely identify a job listing. Multiple languages \
                 can be provided as a comma separated list. Default: 'en-US'.",default='en-US')
 
+        #Job List Parser
         parser_job_list = subparsers_job.add_parser("list",help="List all CTS companies in a tenant.")
         parser_job_list.add_argument("--project_id",help="Project id of the CTS instance.",default=config.APP['gcp_project'])
         parser_job_list.add_argument("--tenant_id",help="Unique human-friendly, external id of the tenant.")
@@ -230,7 +240,7 @@ class cts_cli:
                     raise ValueError("Misconfigured or missing project ID.") 
                     exit(1)
                 else:
-                    job.delete_job(project_id=args.project_id,tenant_id=args.tenant_id,external_id=args.external_id,all=args.all,forced=args.forced)
+                    job.delete_job(project_id=args.project_id,company_id=args.company_id,tenant_id=args.tenant_id,external_id=args.external_id,languages=args.language,all=args.all,forced=args.forced)
             elif args.operation == 'show':
                 if args.project_id is None or args.project_id == "":
                     raise ValueError("Misconfigured or missing project ID.") 
