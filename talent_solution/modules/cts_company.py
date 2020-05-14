@@ -10,7 +10,7 @@ import inspect
 import re
 import json
 from datetime import datetime
-from modules import cts_db,cts_tenant
+from modules import cts_db,cts_tenant,cts_helper
 from modules.cts_errors import UnknownCompanyError
 from modules.cts_helper import get_parent
 from conf import config as config
@@ -31,7 +31,6 @@ class Company:
     def create_company(self,project_id,tenant_id=None,company_object=None,file=None):
         logger.debug("CALLED: create_company({},{},{},{} by {})".format(project_id,tenant_id,company_object,file,inspect.currentframe().f_back.f_code.co_name))
         try:
-            db = cts_db.DB().connection
             client = self.client()       
             logger.debug("Company input: Type {}\n{}".format(type(company_object),company_object))
             if isinstance(company_object,dict):
@@ -57,7 +56,6 @@ class Company:
                         parent = client.project_path(project_id)
                     logger.debug("{}:Parent path set to: {}".format(inspect.currentframe().f_code.co_name,parent))
                     try:
-                        new_company ={}
                         new_company = client.create_company(parent,company_object)
                     except AlreadyExists as e:                    
                         logger.debug("Company {} exists in server. (TODO)Creating local record..".format(company_object))
@@ -89,17 +87,10 @@ class Company:
                     except Exception as e:
                         raise e
 
-                    company_key = project_id+"-"+tenant_id+"-"+external_id if tenant_id is not None else project_id+"-"+external_id
-                    logger.debug("Inserting record for company key:{}".format(company_key))
-                    logger.debug("Query: INSERT INTO company (company_key,external_id,company_name,tenant_name,project_id,suspended,create_time)    \
-                        VALUES ('{}','{}','{}','{}','{}','{:d}','{}')".format(company_key,new_company.external_id,    \
-                            new_company.name,tenant_name,project_id,0,datetime.now()))
-                    db.execute("INSERT INTO company (company_key,external_id,company_name,tenant_name,project_id,suspended,create_time) \
-                        VALUES (?,?,?,?,?,?,?)",\
-                        (company_key,new_company.external_id,new_company.name,tenant_name,project_id,0,datetime.now()))
-                    logger.info("Company {} created.\n{}".format(external_id,new_company))
-                    print("Company {} created.\n{}".format(external_id,new_company))
-                    return new_company
+                    if cts_helper.persist_to_db(new_company,project_id=project_id,tenant_id=tenant_id):
+                        logger.info("Company {} created.\n{}".format(external_id,new_company))
+                        print("Company {} created.\n{}".format(external_id,new_company))
+                        return new_company
                 else:
                     logger.error("{}: Company {} already exists.\n{}".format(inspect.currentframe().f_code.co_name,external_id,\
                         existing_company),exc_info=config.LOGGING['traceback'])

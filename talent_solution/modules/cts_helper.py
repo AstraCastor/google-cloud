@@ -12,6 +12,7 @@ from conf import config
 from google.cloud.talent_v4beta1.proto.common_pb2 import CustomAttribute
 from google.protobuf.timestamp_pb2 import Timestamp
 from google.cloud.talent_v4beta1.types import Job as CTS_Job
+from google.cloud.talent_v4beta1.types import Company as CTS_Company
 
 #Get the root logger
 logger = logging.getLogger()
@@ -210,9 +211,22 @@ def persist_to_db(object,project_id,tenant_id=None,company_id=None):
                 VALUES (?,?,?,?,?,?,?,?,?)",(job_key,external_id,language,job.name,company_name,tenant_name,project_id,0,datetime.now()))
             logger.debug("Job req ID {} created in DB for company {}.".format(external_id,company_id))
             return True
+        # Persisting a Company_Object
+        elif isinstance(object,CTS_Company):
+            company = object
+            company_key = project_id+"-"+tenant_id+"-"+company.external_id if tenant_id is not None else project_id+"-"+company.external_id           
+            tenant_name = re.search('(.*)\/companies\/.*$',company.name).group(1) if tenant_id is not None else ""
+            logger.debug("Inserting record for company key:{}".format(company_key))
+            logger.debug("Query: INSERT INTO company (company_key,external_id,company_name,tenant_name,project_id,suspended,create_time)    \
+                VALUES ('{}','{}','{}','{}','{}','{:d}','{}')".format(company_key,company.external_id,    \
+                    company.name,tenant_name,project_id,0,datetime.now()))
+            db.execute("INSERT INTO company (company_key,external_id,company_name,tenant_name,project_id,suspended,create_time) \
+                VALUES (?,?,?,?,?,?,?)",\
+                (company_key,company.external_id,company.name,tenant_name,project_id,0,datetime.now()))        
+            return True    
+
     except Exception as e:
-        logger.error("Error when creating job req ID {} in DB for company {}. Message: {}".format(external_id,\
-            company_id,e))
+        logger.error("Error when persisting object in DB: {}. Message: {}".format(object,e))
 
 
 
