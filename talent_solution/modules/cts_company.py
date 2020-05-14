@@ -1,5 +1,6 @@
 from google.cloud import talent_v4beta1
 from google.api_core.exceptions import AlreadyExists, NotFound, GoogleAPICallError, RetryError
+from google.cloud.talent_v4beta1.types import Company as CTS_Company
 
 import os
 import sys
@@ -18,13 +19,6 @@ from conf import config as config
 logger = logging.getLogger()
 
 class Company:
-    def __init__(self,external_id=None,name=None):
-        try:
-            self.external_id = external_id
-            self.name = name
-            logging.debug("Company instantiated.")
-        except Exception as e:
-            logging.error("Error instantiating Company. Message: {}".format(e),exc_info=config.LOGGING['traceback'])
     
     def client(self):
         credential_file = config.APP['secret_key']
@@ -43,9 +37,9 @@ class Company:
             if isinstance(company_object,dict):
                 external_id = company_object['external_id']
                 # Check if it is an existing company
-                logger.debug("{}:Calling get_company({},{})".format(inspect.currentframe().f_code.co_name,project_id,external_id))
-                existing_company = self.get_company(project_id=project_id,tenant_id=tenant_id,external_id=external_id)
-                logger.debug("{}:get_company returned:{}".format(inspect.currentframe().f_code.co_name,existing_company))
+                logger.debug("Calling get_company({},{})".format(project_id,external_id))
+                existing_company = self.get_company(project_id=project_id,tenant_id=tenant_id,external_id=external_id,scope='limited')
+                logger.debug("get_company returned:{}".format(existing_company))
                 if existing_company is None:
                     if tenant_id is not None:
                         # To set the parent of the company to be created to the tenant_name 
@@ -60,7 +54,6 @@ class Company:
                         tenant_name = tenant_obj.name
                     else:
                         tenant_name = None
-                        # tenant_id = ""
                         parent = client.project_path(project_id)
                     logger.debug("{}:Parent path set to: {}".format(inspect.currentframe().f_code.co_name,parent))
                     try:
@@ -206,9 +199,14 @@ class Company:
                     return None
                 else:
                     logger.debug("db lookup:{}".format(rows))
+                    lookedup_companies = []
                     if scope == 'limited':
                         #Return limited data looked up from the DB
-                        lookedup_companies = [Company(row[0],row[1]) for row in rows]
+                        for row in rows:
+                            limited_company = CTS_Company()
+                            limited_company.name = row[1]
+                            limited_company.external_id = row[0]
+                            lookedup_companies.append(limited_company)
                         logger.debug("Company show operation - scope limited: {}".format(lookedup_companies))
                     else:
                         #Return limited data looked up from the server
