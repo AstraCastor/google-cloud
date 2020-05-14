@@ -55,50 +55,36 @@ class Company:
                         tenant_name = None
                         parent = client.project_path(project_id)
                     logger.debug("{}:Parent path set to: {}".format(inspect.currentframe().f_code.co_name,parent))
-                    try:
-                        new_company = client.create_company(parent,company_object)
-                    except AlreadyExists as e:                    
-                        logger.debug("Company {} exists in server. (TODO)Creating local record..".format(company_object))
-                        #TODO: Better error handling
-                        # print("Error Message:{}".format(e.message))
-                        # company_name_re = re.compile('^Company (.*?) (:?.*)')
-                        # regx_search = company_name_re.findall(e.message)
-                        # print("REGEX OUT {}".format(regx_search))
-                        # print ("REGEX TYPE: {}".format(type(regx_search)))
-                        # company_name = regx_search
-                        # print("REGEX[0][0]".format(str(regx_search[0][0])))
-                        # print ("Company Name:".format(regx_search[0][0]))
-                        # print ("Company Name:".format(regx_search[0][1]))
-                        # print ("Company Name:".format(regx_search[0]))
-
-                        # print ("Company Name : {}".format(company_name))
-                        # print ("Company Name : {}".format(company_name[0]))
-                        # print ("Company Name : {}".format(company_name[0][0]))
-                        # print ("Company Name : {}".format(company_name[0][1]))
-
-                        # new_company['external_id']=company_object['external_id']
-                        # new_company['company_name'] = company_name[0][0]
-                        # print ("Type of New company {}".format(type(new_company)))
-                        # print ("New company length {}".format(len(new_company)))
-                        # for k,v in new_company.items():
-                        #        print ("New Company items: {} {}".format(k,v)) 
-                        # print("New company after error:".format(new_company))
-                        pass
-                    except Exception as e:
-                        raise e
-
+                    new_company = client.create_company(parent,company_object)
                     if cts_helper.persist_to_db(new_company,project_id=project_id,tenant_id=tenant_id):
                         logger.info("Company {} created.\n{}".format(external_id,new_company))
                         print("Company {} created.\n{}".format(external_id,new_company))
                         return new_company
+                    else:
+                        raise
                 else:
-                    logger.error("{}: Company {} already exists.\n{}".format(inspect.currentframe().f_code.co_name,external_id,\
-                        existing_company),exc_info=config.LOGGING['traceback'])
+                    logger.warning("Company {} already exists.\n{}".format(external_id,existing_company))
                     return None
             else:
-                logger.error("{}:Invalid or missing company argument. Should be a valid company object.\n {}"\
+                logger.error("{}:Invalid or missing company argument. Input should be a valid company JSON.\n {}"\
                     .format(inspect.currentframe().f_code.co_name,company_object),exc_info=config.LOGGING['traceback'])
                 raise ValueError
+
+        except AlreadyExists as e:                    
+            logger.warning("Company {} exists in server. Creating local record..".format(company_object))
+            # Sync with DB if it doesn't exist in DB
+            logger.warning("Local DB out of sync. Syncing local db..")
+            sync_company = CTS_Company()
+            sync_company.name = re.search("^Company (.*) already exists.*$",e.message).group(1)
+            sync_company.external_id = company_object['external_id']
+            if cts_helper.persist_to_db(sync_company,project_id=project_id,tenant_id=tenant_id):
+                logger.warning("Company {} record synced to DB.".format(external_id))                        
+            else:
+                raise
+        except ValueError:
+            logger.error("Invalid Parameters")
+        except GoogleAPICallError as e:
+            logger.error("API error when creating job. Message: {}".format(e))
         except Exception as e:
             logger.error("{}:Error creating company:\n{}\n{}".format(inspect.currentframe().f_code.co_name,company_object,e),\
                 exc_info=config.LOGGING['traceback'])
