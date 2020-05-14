@@ -71,7 +71,7 @@ class Job():
                         logger.debug("Posting parsed job {}".format(parsed_job))
                         new_job = client.create_job(parent,parsed_job,metadata=[job_req_metadata])
                         if new_job is not None:
-                            if cts_helper.persist_to_db(object=new_job,project_id=project_id,tenant_id=tenant_id,company_id=company_id):
+                            if cts_db.persist_to_db(object=new_job,project_id=project_id,tenant_id=tenant_id,company_id=company_id):
                                 print ("Created job requisition ID {} for company {}.".format(input_job.requisition_id,company_id))
                         else:
                             raise
@@ -84,7 +84,7 @@ class Job():
                     logger.warning("Local DB out of sync. Syncing local db..")
                     sync_job_name = re.search("^Job (.*) already exists.*$",e.message).group(1)
                     sync_job = client.get_job(sync_job_name)
-                    if cts_helper.persist_to_db(sync_job,project_id=project_id,tenant_id=tenant_id,company_id=company_id):
+                    if cts_db.persist_to_db(sync_job,project_id=project_id,tenant_id=tenant_id,company_id=company_id):
                         logger.warning("Job requisition ID {} for company {} synced to DB.".format(parsed_job['requisition_id'],\
                             company_id))
                     else:
@@ -130,7 +130,7 @@ class Job():
                                 job_count = 0
                                 for result in op_result.job_results:
                                     if result.job.requisition_id is not None and result.job.requisition_id is not "":
-                                        cts_helper.persist_to_db(result.job,project_id=project_id,tenant_id=tenant_id,company_id=company_id)
+                                        cts_db.persist_to_db(result.job,project_id=project_id,tenant_id=tenant_id,company_id=company_id)
                                         logger.debug("Job {} created.".format(result.job.requisition_id))
                                         job_count += 1
                                     else:

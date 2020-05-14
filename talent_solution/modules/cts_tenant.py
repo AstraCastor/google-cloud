@@ -8,7 +8,7 @@ import logging
 import inspect
 import re
 from datetime import datetime
-from modules import cts_db,cts_helper
+from modules import cts_db
 from conf import config as config
 
 #Get the root logger
@@ -84,14 +84,13 @@ class Tenant:
         """
         logger.debug("CALLED: create_tenant({},{} by {})".format(project_id,external_id,inspect.currentframe().f_back.f_code.co_name))
         try:
-            db = cts_db.DB().connection
             client = self.client()
             existing_tenant = self.get_tenant(project_id=project_id,external_id=external_id)
             if existing_tenant is None:
                 parent = client.project_path(project_id)
                 tenant_object = {'external_id':external_id}
                 new_tenant = client.create_tenant(parent,tenant_object)
-                if cts_helper.persist_to_db(new_tenant,project_id):
+                if cts_db.persist_to_db(new_tenant,project_id):
                     logger.info("Tenant {} created.\n{}".format(external_id,new_tenant))
                     return new_tenant
                 else:
@@ -108,7 +107,7 @@ class Tenant:
             sync_tenant = CTS_Tenant()
             sync_tenant.name = re.search("^Tenant (.*) already exists.*$",e.message).group(1)
             sync_tenant.external_id = external_id
-            if cts_helper.persist_to_db(sync_tenant,project_id=project_id):
+            if cts_db.persist_to_db(sync_tenant,project_id=project_id):
                 logger.warning("Company {} record synced to DB.".format(external_id))                        
             else:
                 raise Exception("Error when syncing tenant {} to DB.".format(sync_tenant.external_id)) 

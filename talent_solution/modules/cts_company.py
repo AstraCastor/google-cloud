@@ -70,7 +70,7 @@ class Company:
                             parent = client.project_path(project_id)
                         logger.debug("Parent path set to: {}".format(parent))
                         new_company = client.create_company(parent,company_object)
-                        if cts_helper.persist_to_db(new_company,project_id=project_id,tenant_id=tenant_id):
+                        if cts_db.persist_to_db(new_company,project_id=project_id,tenant_id=tenant_id):
                             logger.info("Company {} created.\n{}".format(external_id,new_company))
                             print("Company {} created.\n{}".format(external_id,new_company))
                             # return new_company
@@ -88,7 +88,7 @@ class Company:
                     sync_company = CTS_Company()
                     sync_company.name = re.search("^Company (.*) already exists.*$",e.message).group(1)
                     sync_company.external_id = company_object['external_id']
-                    if cts_helper.persist_to_db(sync_company,project_id=project_id,tenant_id=tenant_id):
+                    if cts_db.persist_to_db(sync_company,project_id=project_id,tenant_id=tenant_id):
                         logger.warning("Company {} record synced to DB.".format(external_id))                        
                     else:
                         raise Exception("Error when syncing company {} to DB.".format(sync_company.external_id))
