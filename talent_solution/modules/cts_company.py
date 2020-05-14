@@ -40,8 +40,11 @@ class Company:
             company_errors = []
             for c in companies:
                 try:
-                    line,company_batch_item = c[0].popitem()
-                    company_object = company_batch_item.pop()
+                    if file:
+                        line,company_batch_item = c[0].popitem()
+                        company_object = company_batch_item.pop()
+                    else:
+                        company_object = c
                     if isinstance(company_object,str):
                         company_object = json.loads(company_object)
 
@@ -55,7 +58,7 @@ class Company:
                             # To set the parent of the company to be created to the tenant_name 
                             # for the given tenant_id(tenant external_id)
                             tenant = cts_tenant.Tenant()
-                            tenant_obj = tenant.get_tenant(project_id,tenant_id)
+                            tenant_obj = tenant.get_tenant(project_id,tenant_id,scope='limited')
                             logger.debug("Tenant retrieved:\n{}".format(tenant_obj))
                             if tenant_obj is None:
                                 logging.error("Unknown Tenant: {}".format(tenant_id),exc_info=config.LOGGING['traceback'])
@@ -88,13 +91,13 @@ class Company:
                     if cts_helper.persist_to_db(sync_company,project_id=project_id,tenant_id=tenant_id):
                         logger.warning("Company {} record synced to DB.".format(external_id))                        
                     else:
-                        raise("Error when persisting company {} to DB.".format(sync_company.external_id))
+                        raise Exception("Error when syncing company {} to DB.".format(sync_company.external_id))
                 except Exception as e:
                      company_errors.append(e)
             print("{} Companies created.".format(company_count))
-            logger.debug("{} Companies created.".format(company_count))
+            logger.debug("Total companies created: {}".format(company_count))
             if company_errors:
-                raise company_errors
+                raise Exception(company_errors)
         except ValueError:
             logger.error("Invalid Input Parameters.")
             raise
@@ -216,7 +219,7 @@ class Company:
             elif all:
                 if tenant_id is not None:
                     tenant = cts_tenant.Tenant()
-                    tenant_obj = tenant.get_tenant(project_id,tenant_id)
+                    tenant_obj = tenant.get_tenant(project_id,tenant_id,scope='limited')
                     logger.debug("{}:Tenant retrieved:\n{}".format(inspect.currentframe().f_code.co_name,tenant_obj))
                     if tenant_obj is None:
                         logger.error("{}:Unknown Tenant: {}".format(inspect.currentframe().f_code.co_name,tenant_id),\

@@ -1,11 +1,14 @@
 from google.cloud import talent_v4beta1
+from google.cloud.talent_v4beta1.types import Tenant as CTS_Tenant
+from google.api_core.exceptions import AlreadyExists, NotFound, GoogleAPICallError, RetryError
+
 import os
 import sys
 import logging
-import argparse
 import inspect
+import re
 from datetime import datetime
-from modules import cts_db
+from modules import cts_db,cts_helper
 from conf import config as config
 
 #Get the root logger
@@ -31,7 +34,7 @@ class Tenant:
         except Exception as e:
             logging.error("Error instantiating Tenant client. Message: {}".format(e),exc_info=config.LOGGING['traceback'])
 
-    def get_tenant(self,project_id,external_id=None,all=False):
+    def get_tenant(self,project_id,external_id=None,all=False,scope="full"):
         """ Get CTS tenant by name or get all CTS tenants by project.
         Args:
             talent_client: an instance of TalentServiceClient()
@@ -40,7 +43,7 @@ class Tenant:
         Returns:
             an instance of Tenant or None if tenant was not found.
         """
-        logger.debug("CALLED: get_tenant({},{},{} by {})".format(project_id,external_id,all,inspect.currentframe().f_back.f_code.co_name))
+        logger.debug("CALLED: get_tenant({},{},{},{} by {})".format(project_id,external_id,all,scope,inspect.currentframe().f_back.f_code.co_name))
         try:
             db = cts_db.DB().connection
             client = self.client()
@@ -57,11 +60,16 @@ class Tenant:
                     return None
                 else:
                     logger.debug("db lookup:{}".format(rows))
-                    tenant = client.get_tenant(rows[0][1])
+                    if scope=='limited':
+                        tenant = CTS_Tenant()
+                        tenant.external_id = rows[0][0]
+                        tenant.name = rows[0][1]
+                    else:
+                        tenant = client.get_tenant(rows[0][1])
             elif all:
                 parent = client.project_path(project_id)
                 tenant = [t for t in client.list_tenants(parent)]
-            return tenant
+            return tenant       
         except Exception as e:
             logger.error("Error getting tenant by name {}. Message: {}".format(external_id,e),exc_info=config.LOGGING['traceback'])
             raise        
@@ -83,18 +91,27 @@ class Tenant:
                 parent = client.project_path(project_id)
                 tenant_object = {'external_id':external_id}
                 new_tenant = client.create_tenant(parent,tenant_object)
-                logger.debug("Query:INSERT INTO tenant (tenant_key,external_id,tenant_name,project_id,suspended,create_time) \
-                    VALUES ('{}','{}','{}','{}','{:d}','{}')".format(project_id+"-"+external_id,new_tenant.external_id,new_tenant.name,project_id,1,datetime.now()))
-                # db.execute("INSERT INTO tenant (tenant_key,external_id,tenant_name,project_id,suspended,create_time) \
-                #     VALUES ('{}','{}','{}','{}',{:d},'{}')".format(project_id+"-"+external_id,new_tenant.external_id,new_tenant.name,project_id,1,datetime.now()))
-                db.execute("INSERT INTO tenant (tenant_key,external_id,tenant_name,project_id,suspended,create_time) \
-                    VALUES (?,?,?,?,?,?)",(project_id+"-"+external_id,new_tenant.external_id,new_tenant.name,project_id,1,datetime.now()))
-                logger.info("Tenant {} created.\n{}".format(external_id,new_tenant))
-                return new_tenant
+                if cts_helper.persist_to_db(new_tenant,project_id):
+                    logger.info("Tenant {} created.\n{}".format(external_id,new_tenant))
+                    return new_tenant
+                else:
+                    raise Exception("Error when persisting tenant {} to DB.".format(external_id))
             else:
                 logger.warning("Tenant {} already exists.\n{}".format(external_id,existing_tenant))
                 print("Tenant {} already exists.\n{}".format(external_id,existing_tenant))
                 return None
+
+        except AlreadyExists as e:                    
+            logger.warning("Tenant {} exists in server. Creating local record..".format(external_id))
+            # Sync with DB if it doesn't exist in DB
+            logger.warning("Local DB out of sync. Syncing local db..")
+            sync_tenant = CTS_Tenant()
+            sync_tenant.name = re.search("^Tenant (.*) already exists.*$",e.message).group(1)
+            sync_tenant.external_id = external_id
+            if cts_helper.persist_to_db(sync_tenant,project_id=project_id):
+                logger.warning("Company {} record synced to DB.".format(external_id))                        
+            else:
+                raise Exception("Error when syncing tenant {} to DB.".format(sync_tenant.external_id)) 
         except Exception as e:
             logger.error("Error creating tenant {}: {}".format(external_id,e),exc_info=config.LOGGING['traceback'])
             self.delete_tenant(project_id,external_id,forced=True)

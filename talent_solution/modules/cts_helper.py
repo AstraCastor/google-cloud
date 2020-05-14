@@ -13,6 +13,7 @@ from google.cloud.talent_v4beta1.proto.common_pb2 import CustomAttribute
 from google.protobuf.timestamp_pb2 import Timestamp
 from google.cloud.talent_v4beta1.types import Job as CTS_Job
 from google.cloud.talent_v4beta1.types import Company as CTS_Company
+from google.cloud.talent_v4beta1.types import Tenant as CTS_Tenant
 
 #Get the root logger
 logger = logging.getLogger()
@@ -25,7 +26,7 @@ def get_parent(project_id,tenant_id=None):
         if tenant_id is not None:
             # To set the parent of the company to be created to the tenant_name 
             # for the given tenant_id(tenant external_id)
-            tenant_obj = client.get_tenant(project_id,tenant_id)
+            tenant_obj = client.get_tenant(project_id,tenant_id,scope='limited')
             if tenant_obj is None:
                 logging.error("Unknown Tenant: {}".format(tenant_id),exc_info=config.LOGGING['traceback'])
                 exit(1)
@@ -224,6 +225,12 @@ def persist_to_db(object,project_id,tenant_id=None,company_id=None):
                 VALUES (?,?,?,?,?,?,?)",\
                 (company_key,company.external_id,company.name,tenant_name,project_id,0,datetime.now()))        
             return True    
+        elif isinstance(object,CTS_Tenant):
+            tenant = object
+            logger.debug("Query:INSERT INTO tenant (tenant_key,external_id,tenant_name,project_id,suspended,create_time) \
+            VALUES ('{}','{}','{}','{}','{:d}','{}')".format(project_id+"-"+external_id,tenant.external_id,tenant.name,project_id,1,datetime.now()))
+            db.execute("INSERT INTO tenant (tenant_key,external_id,tenant_name,project_id,suspended,create_time) \
+            VALUES (?,?,?,?,?,?)",(project_id+"-"+external_id,tenant.external_id,tenant.name,project_id,1,datetime.now()))
 
     except Exception as e:
         logger.error("Error when persisting object in DB: {}. Message: {}".format(object,e))

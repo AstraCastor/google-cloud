@@ -88,7 +88,7 @@ class Job():
                         logger.warning("Job requisition ID {} for company {} synced to DB.".format(parsed_job['requisition_id'],\
                             company_id))
                     else:
-                        raise
+                        raise Exception("Error when syncing job requisition ID {} for company {} to DB.".format(sync_job.requisition_id))
                 except ValueError:
                     logger.error("Invalid Parameters")
                 except GoogleAPICallError as e:
@@ -355,7 +355,7 @@ class Job():
                 if tenant_id is not None:
                     logger.debug("Tenant: {}\n".format(tenant_id))
                     tenant = cts_tenant.Tenant()
-                    tenant_obj = tenant.get_tenant(project_id,tenant_id)
+                    tenant_obj = tenant.get_tenant(project_id,tenant_id,scope='limited')
                     logger.debug("Tenant retrieved:\n{}".format(tenant_obj))
                     if tenant_obj is None:
                         logging.error("Unknown Tenant: {}".format(tenant_id),\
