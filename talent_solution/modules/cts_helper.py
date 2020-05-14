@@ -227,6 +227,7 @@ def persist_to_db(object,project_id,tenant_id=None,company_id=None):
 
     except Exception as e:
         logger.error("Error when persisting object in DB: {}. Message: {}".format(object,e))
+        return False
 
 
 
