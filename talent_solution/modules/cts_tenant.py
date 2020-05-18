@@ -92,6 +92,7 @@ class Tenant:
                 new_tenant = client.create_tenant(parent,tenant_object)
                 if cts_db.persist_to_db(new_tenant,project_id):
                     logger.info("Tenant {} created.\n{}".format(external_id,new_tenant))
+                    print("Tenant {} created.\n{}".format(external_id,new_tenant))
                     return new_tenant
                 else:
                     raise Exception("Error when persisting tenant {} to DB.".format(external_id))
@@ -145,8 +146,9 @@ class Tenant:
                 # db.execute("DELETE FROM tenant where external_id = '{}'".format(existing_tenant.external_id))
                 db.execute("DELETE FROM tenant where external_id = ?",(existing_tenant.external_id,))
                 logger.info("Tenant {} deleted.".format(external_id))
+                print("Tenant {} deleted.".format(external_id))
             else:
-                logger.error("Tenant {} does not exist.".format(external_id,existing_tenant),exc_info=config.LOGGING['traceback'])
+                logger.warning("Tenant {} does not exist.".format(external_id,existing_tenant))
                 return None
         except Exception as e:
             logger.error("Error deleting tenant {}: {}".format(external_id,e),exc_info=config.LOGGING['traceback'])

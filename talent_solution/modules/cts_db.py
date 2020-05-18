@@ -84,7 +84,7 @@ class DB():
             errors = []
             for table in schema:
                 try:
-                    cursor.execute("select True from {}".format(table))
+                    cursor.execute("select 1 from {}".format(table))
                 except sqlite3.OperationalError as e:
                     logger.error(e)
                     logger.warn("DB Check: {} is missing and will be recreated.".format(table)) 
@@ -176,9 +176,10 @@ def persist_to_db(object,project_id,tenant_id=None,company_id=None):
         elif isinstance(object,CTS_Tenant):
             tenant = object
             logger.debug("Query:INSERT INTO tenant (tenant_key,external_id,tenant_name,project_id,suspended,create_time) \
-            VALUES ('{}','{}','{}','{}','{:d}','{}')".format(project_id+"-"+external_id,tenant.external_id,tenant.name,project_id,1,datetime.now()))
+            VALUES ('{}','{}','{}','{}','{:d}','{}')".format(project_id+"-"+tenant.external_id,tenant.external_id,tenant.name,project_id,0,datetime.now()))
             db.execute("INSERT INTO tenant (tenant_key,external_id,tenant_name,project_id,suspended,create_time) \
-            VALUES (?,?,?,?,?,?)",(project_id+"-"+external_id,tenant.external_id,tenant.name,project_id,1,datetime.now()))
+            VALUES (?,?,?,?,?,?)",(project_id+"-"+tenant.external_id,tenant.external_id,tenant.name,project_id,0,datetime.now()))
+            return True
 
     except Exception as e:
         logger.error("Error when persisting object in DB: {}. Message: {}".format(object,e))

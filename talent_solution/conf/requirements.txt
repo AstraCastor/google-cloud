@@ -1,1 +1,3 @@
 google-cloud-talent
+pysqlite3
+argparse

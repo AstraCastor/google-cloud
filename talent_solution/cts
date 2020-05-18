@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 from google.cloud import talent_v4beta1
 import os
 import sys
@@ -32,7 +32,8 @@ class cts_cli:
         main_parser = argparse.ArgumentParser(description="Cloud Talent Solution Command Line tool")
 
         subparsers_main = main_parser.add_subparsers(dest="entity",help="An entity such as a company, job, profile or application \
-            supported by Cloud Talent.",required=True)
+            supported by Cloud Talent.")
+        subparsers_main.required=True
         parser_tenant = subparsers_main.add_parser("tenant",help="Perform operations on a CTS tenant object.")
         parser_company = subparsers_main.add_parser("company",help="Perform operations on a CTS company object.")
         parser_job = subparsers_main.add_parser("job",help="Perform operations on a CTS job object.")
