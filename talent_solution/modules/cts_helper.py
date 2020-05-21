@@ -81,7 +81,11 @@ def parse_job(project_id,tenant_id,jobs=[]):
                 if "description" not in job or job['description'] is "":
                     raise UnparseableJobError("Missing job description for job requisition ID {}".format(job['requisition_id']))
                 if "company" in job:
-                    job['company']=[company.name for company in companies if job['company']==company.external_id].pop()
+                    lookedup_company_name = [company.name for company in companies if job['company']==company.external_id].pop()
+                    if lookedup_company_name is None:
+                        raise UnparseableJobError("Missing company ID for job requisition ID {}".format(job['requisition_id']))
+                    else:
+                        job['company'] = lookedup_company_name
                 else:
                     raise UnparseableJobError("Missing company ID for job requisition ID {}".format(job['requisition_id']))
                 if "language_code" not in job:
@@ -99,7 +103,6 @@ def parse_job(project_id,tenant_id,jobs=[]):
                 if "posting_expire_time" in job:
                     job['posting_expire_time']=Timestamp(seconds=int(job['posting_expire_time']))
                 for attr in list(job['custom_attributes']):
-                    # job['custom_attributes'][key]=CustomAttribute(string_values=[job['custom_attributes'][key]['string_values'][0]],filterable=True)
                     if 'string_values' in job['custom_attributes'][attr]:
                         if job['custom_attributes'][attr]['string_values'] != [""] and job['custom_attributes'][attr]['string_values'] is not None:
                             job['custom_attributes'][attr]=CustomAttribute(string_values=job['custom_attributes'][attr]['string_values'],filterable=job['custom_attributes'][attr]['filterable'])
@@ -115,8 +118,6 @@ def parse_job(project_id,tenant_id,jobs=[]):
                 parsed_batch.append(job)
             except UnparseableJobError as e:
                 errors[job]=e
-                # logger.error("Passed job string is not a valid Job JSON. Error when parsing:\n {}".format(job),\
-                #         exc_info=config.LOGGING['traceback'])
         if errors:
             raise UnparseableJobError(errors)
     except Exception as e:

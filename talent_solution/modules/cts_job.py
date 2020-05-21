@@ -40,7 +40,6 @@ class Job():
     def create_job(self,project_id,tenant_id=None,input_job=None,file=None):
         logger.debug("logger:CALLED: create_job({},{},{},{})".format(project_id,tenant_id,input_job,file))
         try:
-            # db = cts_db.DB().connection
             client = self.client()
             #Prepare Request Metadata
             # TODO:Replace with config 
@@ -101,7 +100,7 @@ class Job():
                 if os.path.exists(file):
                     logger.debug("Reading input file from {}".format(file))
                     #TODO: Replace with a config param
-                    batch_size = 2
+                    batch_size = config.BATCH_PROCESS['batch_size'] or 200
                     #TODO: Replace with a batch_info object to unify all the batch output metrics.
                     # batch_info[batch_id]={"start":starting_line,"end":ending_line,"input":"","posted":"",\
                     # "operation":"","created":"","errors":[]}
@@ -110,33 +109,22 @@ class Job():
                     def operation_complete(operation_future):
                         nonlocal total_jobs_created
                         try:
-                            # print("Size of operation after callback: {}".format(sys.getsizeof(operation)))
-                            # if operation_future in batch_ops.values(): 
-                                print ("operation_future in batch_ops.values() is True")
-                                print ("Metadata is {}".format(operation_future.metadata))
-                                print ("State is {}".format(operation_future.metadata.state))
-                                print ("Op name is: {}".format(operation_future.operation.name))
-                                print ("Operation Future dir is: {}".format(dir(operation_future)))
-                                operation = operation_future.operation
-                                # if operation_future.metadata.state==3:
-                                # if operation_future.done and operation.error is None:
-                                # if operation_future.done:
-                                #     print ("operation_future.metadata.state==3 (SUCCEEDED) is True")
-                                op_result = operation_future.result()
-                                for id,op in batch_ops.items():
-                                    if op == operation_future:
-                                        batch_id = id 
-                                logger.debug("Batch ID {} results:\n".format(batch_id))
-                                job_count = 0
-                                for result in op_result.job_results:
-                                    if result.job.requisition_id is not None and result.job.requisition_id is not "":
-                                        cts_db.persist_to_db(result.job,project_id=project_id,tenant_id=tenant_id,company_id=company_id)
-                                        logger.debug("Job {} created.".format(result.job.requisition_id))
-                                        job_count += 1
-                                    else:
-                                        error_row = (batch_id-1)*batch_size+list(op_result.job_results).index(result)+1
-                                        print ("Error when creating job in row {}".format(error_row))
-                                        logger.warning("Error when creating job in row {}".format(error_row))  
+                            operation = operation_future.operation
+                            op_result = operation_future.result()
+                            for id,op in batch_ops.items():
+                                if op == operation_future:
+                                    batch_id = id 
+                            logger.debug("Batch ID {} results:\n".format(batch_id))
+                            job_count = 0
+                            for result in op_result.job_results:
+                                if result.job.requisition_id is not None and result.job.requisition_id is not "":
+                                    cts_db.persist_to_db(result.job,project_id=project_id,tenant_id=tenant_id,company_id=company_id)
+                                    logger.debug("Job {} created.".format(result.job.requisition_id))
+                                    job_count += 1
+                                else:
+                                    error_row = (batch_id-1)*batch_size+list(op_result.job_results).index(result)+1
+                                    print ("Error when creating job in row {}".format(error_row))
+                                    logger.warning("Error when creating job in row {}".format(error_row))  
                         except Exception as e:
                             logger.error("Error when creating jobs. Message: {}".format(e),exc_info=config.LOGGING['traceback'])
                         else:

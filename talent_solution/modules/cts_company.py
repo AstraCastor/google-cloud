@@ -194,7 +194,7 @@ class Company:
                     .format(",".join("?"*len(company_keys))),company_keys)
                 rows = db.fetchall()
                 if rows == []:
-                    print("Unknown company ID(s): {}".format(external_id))
+                    print("Company ID(s) not found: {}".format(external_id))
                     return None
                 else:
                     logger.debug("db lookup:{}".format(rows))
@@ -212,8 +212,8 @@ class Company:
                         lookedup_companies = [client.get_company(row[1]) for row in rows]
                         logger.debug("Company show operation - scope full: {}".format(lookedup_companies))
                 if len(company_ids)!=len(lookedup_companies):
-                    lookedup_ids = [lc['external_id'] for lc in lookedup_companies]
-                    raise UnknownCompanyError("Missing or unknown company ID(s): {}".format(company_ids - lookedup_ids))
+                    lookedup_ids = [lc.external_id for lc in lookedup_companies]
+                    raise UnknownCompanyError("Missing or unknown company ID(s): {}".format(set(company_ids) - set(lookedup_ids)))
 
             # It's a list all operation
             elif all:
