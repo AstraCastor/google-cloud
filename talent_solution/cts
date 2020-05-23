@@ -132,7 +132,7 @@ class cts_cli:
         parser_job_list = subparsers_job.add_parser("list",help="List all CTS companies in a tenant.")
         parser_job_list.add_argument("--project_id",help="Project id of the CTS instance.",default=config.APP['gcp_project'])
         parser_job_list.add_argument("--tenant_id",help="Unique human-friendly, external id of the tenant.")
-        parser_job_list.add_argument("--company_id",help="Unique human-friendly, external id of the company.",required=True)
+        parser_job_list.add_argument("--company_id",help="Unique human-friendly, external id of the company.")
         parser_job_list.add_argument("--status",help="Status of the job listing. Valid values: OPEN, EXPIRED, ALL. \
             Default: OPEN.",choices=['OPEN','EXPIRED','ALL'],default='OPEN')
 
@@ -235,20 +235,22 @@ class cts_cli:
                     raise ValueError("Misconfigured or missing project ID.") 
                     exit(1)
                 else:
-                    new_job = job.create_job(project_id=args.project_id,tenant_id=args.tenant_id,input_job=args.job,file=args.file)
+                    new_job = job.create_job(project_id=args.project_id,tenant_id=args.tenant_id,input_job=args.job,\
+                        file=args.file)
             elif args.operation == 'delete':
                 if args.project_id is None or args.project_id == "":
                     raise ValueError("Misconfigured or missing project ID.") 
                     exit(1)
                 else:
-                    job.delete_job(project_id=args.project_id,company_id=args.company_id,tenant_id=args.tenant_id,external_id=args.external_id,languages=args.language,all=args.all,forced=args.forced)
+                    job.delete_job(project_id=args.project_id,company_id=args.company_id,tenant_id=args.tenant_id,\
+                        external_id=args.external_id,languages=args.language,all=args.all,forced=args.forced)
             elif args.operation == 'show':
                 if args.project_id is None or args.project_id == "":
                     raise ValueError("Misconfigured or missing project ID.") 
                     exit(1)
                 else:
                     existing_job = job.get_job(project_id=args.project_id,tenant_id=args.tenant_id,company_id=args.company_id,external_id=args.external_id,languages=args.language)
-                    print ("\n{}".format(existing_job)) if existing_job is not None else print("job {} not found."  \
+                    print ("{}".format(existing_job)) if existing_job is not None else logger.warning("Job {} not found."  \
                         .format(args.external_id))
             elif args.operation == 'list':
                 if args.project_id is None or args.project_id == "":
@@ -262,6 +264,7 @@ class cts_cli:
                     else:
                         for job in jobs:
                             print (job)
+                        print("Total {} jobs returned.".format(len(jobs)))
         except Exception as e:
             logging.exception(e)
 

@@ -233,28 +233,27 @@ class Job():
         try:
             db = cts_db.DB().connection
             client = self.client()  
-            if forced:
-                pass
-                # # Get all the jobs for a company from the server directly - get_job(all,scope=full) gets everything from the server directly
-                # all_jobs = self.get_job(project_id=project_id,tenant_id=tenant_id,company_id=company_id, status='ALL', all=True)
-                # logger.debug("Total jobs retrieved: {}".format(len(all_jobs)))
-                # if external_id is not None:
-                #     pass
 
-                # if len(all_jobs) != 0:
-                #     for job in all_companies:
-                #         if company.external_id == external_id:
-                #             existing_company = company
-                #             break
-                #         else:
-                #             existing_company = None
-                # else:
-                #     existing_company = None
-            else:
-                logger.debug("Calling get_job({},{},{},{},{},{})".format(project_id,tenant_id,company_id,external_id,languages,'limited'))
-                existing_jobs = self.get_job(project_id=project_id,company_id=company_id,tenant_id=tenant_id,\
-                    external_id=external_id,languages=languages,scope='limited')
-                logger.debug("Existing job? {}".format(existing_jobs))
+            if external_id is not None:
+                # Single job or multiple languages delete
+                if forced:
+                    # If DB is out of sync with the server, get all the jobs for a company from the server directly
+                    # and loop through the list to find the job 
+                    # get_job(all,scope=full) gets everything from the server directly for a given company
+                    all_jobs = self.get_job(project_id=project_id,tenant_id=tenant_id,company_id=company_id, status='ALL', all=True)
+                    logger.debug("Total jobs retrieved: {}".format(len(all_jobs)))
+                    if languages == 'ALL':
+                        existing_jobs = [job for job in all_jobs if job.requisition_id == external_id]
+                    else:
+                        lang_list = [str(l) for l in languages.split(',')]
+                        existing_jobs = [job for job in all_jobs if job.requisition_id == external_id and job.language_code in lang_list]
+                else:
+                    # Deleting specific jobs by external_id and language_code
+                    logger.debug("Calling get_job({},{},{},{},{},{})".format(project_id,tenant_id,company_id,external_id,languages,'limited'))
+                    existing_jobs = self.get_job(project_id=project_id,company_id=company_id,tenant_id=tenant_id,\
+                        external_id=external_id,languages=languages,scope='limited')
+                    logger.debug("Existing job? {}".format(existing_jobs))
+                
                 if existing_jobs:
                     for job in existing_jobs:
                         logger.info("Deleting job id {}: {} for company {}".format(job.requisition_id,job.language_code, company_id))
@@ -263,10 +262,21 @@ class Job():
                         logger.info("Job {}:{} deleted for company {}.".format(external_id,job.language_code,company_id))
                         print("Job {}:{} deleted for company {}.".format(external_id,job.language_code,company_id))
                 else:
-                    logger.error("Job {} for company {} does not exist.".format(external_id,company_id),\
-                        exc_info=config.LOGGING['traceback'])
-                    print("Job {} for company {} does not exist.".format(external_id,company_id))
+                    logger.warning("Job {} for company {} does not exist.".format(external_id,company_id))
                     return None
+            else:
+                # If job external_id (requisition_id) is not provided, bulk delete
+                existing_jobs = self.get_job(project_id=project_id,company_id=company_id,tenant_id=tenant_id,all=True,scope='limited')
+
+                if len(all_jobs) != 0:
+                    for job in all_companies:
+                        if company.external_id == external_id:
+                            existing_company = company
+                            break
+                        else:
+                            existing_company = None
+                else:
+                    existing_company = None
 
         except ValueError:
             logger.error("Invalid Parameters")
@@ -278,7 +288,7 @@ class Job():
             raise
 
 
-    def get_job(self,project_id,company_id,tenant_id=None,external_id=None,languages='en',status='OPEN',all=False,scope='full'):
+    def get_job(self,project_id,company_id,tenant_id=None,external_id=None,languages='en-US',status='OPEN',all=False,scope='full'):
         """ Get CTS job by name or get all CTS jobs by project.
         Args:
             project_id: Project where the job will be created - string
@@ -299,77 +309,122 @@ class Job():
                 logging.error("Missing arguments: project_id.",exc_info=config.LOGGING['traceback'])
                 raise ValueError
 
-            if tenant_id is not None:
-                # Calculate the tenant_id part of the job_key to look up from the DB
-                logger.debug("Tenant: {}\n".format(tenant_id))
-                job_key = job_key + "-" + tenant_id
-            
-            if company_id is not None:
-                # Calculate the company_id part of the job_key to look up from the DB
-                job_key = job_key + "-" +company_id
-            else:
-                logging.error("Missing arguments: company_id.",exc_info=config.LOGGING['traceback'])
-                raise ValueError                
-
-            if external_id is not None:
-                # Check if it is a SHOW operation but was passed a conflicting arg
-                logger.debug("Req ID: {}\n".format(external_id))
-                if all:
-                    logging.error("Conflicting arguments: --external_id and --all are mutually exclusive."\
+            if all:
+                # LIST operation, could be a tenant level listing (named or default tenant), or a company level listing
+                if external_id:
+                    logging.error("Conflicting arguments: --all and --external_id are mutually exclusive."\
                         ,exc_info=config.LOGGING['traceback'])
                     raise ValueError
-                #Return english listing by default
-                lang_list = [str(l) for l in languages.split(',')]
-                job_keys = [job_key+"-"+external_id+"-"+language for language in lang_list]
-                logger.debug("Searching for job: {}".format(job_key))
-                db.execute("SELECT distinct job_name,external_id,language_code,company_name FROM job where job_key in ({})".format(','.join('?'*len(job_keys))),job_keys)
-                rows = db.fetchall()
-                logger.debug("Job names retrieved: {}".format(rows))
-                if rows == []:
-                    return None
-                else:
-                    logger.debug("db lookup:{}".format(rows))
-                    if scope=='limited':
-                        jobs = [Job(name=row[0],requisition_id=row[1],language_code=row[2],company=row[3]) for row in rows]
-                        logger.debug("Returning Jobs count: {}".format(len(jobs)))
-                    else:
-                        jobs = [client.get_job(row[0]) for row in rows]
-                        logger.debug("Returning Jobs count: {}".format(len(jobs)))
-                    return jobs
-            elif all:
-                # LIST operation
-                # Calculate the parent path : Get tenant name if tenant ID was provided, if not default tenant under the 
-                # given project.
-                if tenant_id is not None:
-                    logger.debug("Tenant: {}\n".format(tenant_id))
-                    tenant = cts_tenant.Tenant()
-                    tenant_obj = tenant.get_tenant(project_id,tenant_id,scope='limited')
-                    logger.debug("Tenant retrieved:\n{}".format(tenant_obj))
-                    if tenant_obj is None:
-                        logging.error("Unknown Tenant: {}".format(tenant_id),\
-                            exc_info=config.LOGGING['traceback'])
-                        exit(1)
-                    parent = tenant_obj.name
-                else:
-                    parent = client.project_path(project_id)
-                logger.debug("Parent path: {}".format(parent))
-                #Default filter
-                filter_ = "status = \"{}\"".format(status)
+                elif company_id:        
+                    # List jobs by company ID
+                    if scope=='full':
+                        # Calculate the parent path : Get tenant name if tenant ID was provided, if not default tenant under the 
+                        # given project.
+                        if tenant_id is not None:
+                            tenant = cts_tenant.Tenant()
+                            tenant_obj = tenant.get_tenant(project_id,tenant_id,scope='limited')
+                            logger.debug("Tenant set to: {}".format(tenant_obj))
+                            if tenant_obj is None:
+                                logging.error("Unknown tenant input: {}".format(tenant_id),\
+                                    exc_info=config.LOGGING['traceback'])
+                                exit(1)
+                            parent = tenant_obj.name
+                        else:
+                            parent = client.project_path(project_id)
+                        logger.debug("Parent path: {}".format(parent))
+                        #Default filter
+                        # Add status to the filter object
+                        filter_ = "status = \"{}\"".format(status)
 
-                # Look up company resource path for filtering
-                company = cts_company.Company().get_company(project_id=project_id,tenant_id=tenant_id,external_id=company_id)
-                logger.debug("Company retrieved:\n{}".format(company))
-                if company is None:
-                    logging.error("Unknown company: {}. Company is a mandatory attribute for a job listing, create the company \
-                        before creating or looking up job listings.".format(company_id))
-                    exit(1)
+                        # Look up company resource path for filtering
+                        company = cts_company.Company().get_company(project_id=project_id,tenant_id=tenant_id,external_id=company_id,scope='limited')
+                        logger.debug("Company retrieved: {}".format(company))
+                        if company is None:
+                            logging.error("Unknown company: {}. Company is a mandatory attribute for a job listing, create the company \
+                                before creating or looking up job listings.".format(company_id))
+                            exit(1)
+                        else:
+                            filter_ = filter_ + " AND companyName = \"{}\"".format(company[0].name)
+
+                        # List by company ID with full scope --> Query CTS to get the full job objects with company filter
+                        logger.debug ("Retrieving all jobs for company {} from tenant {}, filtered by: \n{}".format(company_id,\
+                            tenant_id or 'DEFAULT',filter_))
+                        jobs = [t for t in client.list_jobs(parent,filter_)]
+                        logger.debug("Retreived {} jobs".format(len(jobs)))
+                        return jobs
+                    else:
+                        # Scope = 'limited', retrieve only the IDs from local DB, not the full job objects from the server
+                        if tenant_id is not None:
+                            # Calculate the tenant_id part of the job_key to look up from the DB
+                            job_key = job_key + "-" + tenant_id
+                            logger.debug("Tenant added to job key:{}".format(job_key))
+                        
+                        # Add the company part of the job key
+                        job_key = job_key + "-" + company_id
+                        logger.debug("Company added to job key: {}".format(job_key))
+                        logger.debug("Searching for all jobs for company {} in tenant {}".format(company_id, tenant_id or 'DEFAULT'))
                 else:
-                    filter_ = filter_ + " AND companyName = \"{}\"".format(company[0].name)
-                # Add status to the filter object
+                    # If no company_id was provided, list jobs by tenant (default or a named tenant)
+                    # Note: this is not an op supported by CTS, this is implemented only as a local DB lookup followed by server lookup for full scope listings.
+                    if tenant_id is not None:
+                        # Calculate the tenant_id part of the job_key to look up from the DB
+                        job_key = job_key + "-" + tenant_id
+                        logger.debug("Searching for all jobs from tenant {}".format(tenant_id or 'DEFAULT'))
                 
-                logger.debug ("Listing all jobs for {}, filtered by: \n{}".format(parent,filter_))
-                jobs = [t for t in client.list_jobs(parent,filter_)]
-                return jobs
+                #SQL Pattern search for all jobs based on the job_key
+                job_key = job_key + '%'
+                logger.debug("Search for all jobs based on the job_key: {}".format(job_key))
+                db.execute("SELECT distinct job_name,external_id,language_code,company_name FROM job where job_key like (?)",(job_key,))
+
+            # Show operation, for a specific job requisition ID (external_id) and one, more or all languages      
+            else:
+                # Calculate the tenant_id part of the job_key to look up from the DB
+                if tenant_id is not None:
+                    job_key = job_key + "-" + tenant_id
+                    logger.debug("Tenant added to job key: {}".format(job_key))
+
+                # Calculate the company_id part of the job_key to look up from the DB
+                if company_id:
+                    job_key = job_key + "-" +company_id
+                    logger.debug("Company added to job key: {}".format(job_key))
+
+                if external_id:
+                    # Check if it is a SHOW operation but was passed a conflicting arg
+                    if all:
+                        logging.error("Conflicting arguments: --external_id and --all are mutually exclusive."\
+                            ,exc_info=config.LOGGING['traceback'])
+                        raise ValueError
+
+                    # Add the requisition ID to the job key
+                    job_key = job_key + "-" +external_id
+                    logger.debug("Requisition ID added to job key: {}".format(job_key))
+
+
+                    #Return english listing by default
+                    if languages=='ALL':
+                        logger.debug("Searching for job: {} all languages".format(job_key))
+                        #SQL Pattern search for all languages for a given external ID
+                        job_key = job_key + '%'
+                        db.execute("SELECT distinct job_name,external_id,language_code,company_name FROM job where job_key like (?)",(job_key,))
+                    else:
+                    # Get one or more language listings
+                        lang_list = [str(l) for l in languages.split(',')]
+                        job_keys = [job_key+"-"+language for language in lang_list]
+                        logger.debug("Searching for job keys: \n{}".format(job_keys))
+                        db.execute("SELECT distinct job_name,external_id,language_code,company_name FROM job where job_key in ({})".format(','.join('?'*len(job_keys))),(job_keys))
+
+            # After one of the SQL statements execute, get all the rows and return the processed data.    
+            rows = db.fetchall()
+            logger.debug("Looked up {} jobs from DB".format(len(rows)))
+            if rows == []:
+                return None
+            else:
+                if scope=='limited':
+                    jobs = [Job(name=row[0],requisition_id=row[1],language_code=row[2],company=row[3]) for row in rows]
+                else:
+                    jobs = [client.get_job(row[0]) for row in rows]
+                logger.info("Retrieved {} jobs from CTS.".format(len(jobs)))
+                return jobs     
 
         except Exception as e:
             if external_id is not None:
