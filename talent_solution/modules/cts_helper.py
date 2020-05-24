@@ -165,5 +165,12 @@ def generate_file_batch(file,rows=5,concurrent_batches=1):
     else:
         raise FileNotFoundError("Missing file {}.".format(file))
 
-
-
+def user_confirm(msg):
+    while True:
+        choice = input(msg).lower()
+        if choice == "y" or choice == "":
+            return True
+        elif choice == "n":
+            return False
+        else:
+            print("Invalid response (Valid responses: Y/N/y/n or Enter key to confirm.).")
