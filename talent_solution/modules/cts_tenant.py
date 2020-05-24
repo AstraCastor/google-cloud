@@ -114,10 +114,10 @@ class Tenant:
                 raise Exception("Error when syncing tenant {} to DB.".format(sync_tenant.external_id)) 
         except Exception as e:
             logger.error("Error creating tenant {}: {}".format(external_id,e),exc_info=config.LOGGING['traceback'])
-            self.delete_tenant(project_id,external_id,forced=True)
+            self.delete_tenant(project_id,external_id,force=True)
             raise
 
-    def delete_tenant(self,project_id,external_id,forced=False):
+    def delete_tenant(self,project_id,external_id,force=False):
         """ Delete a CTS tenant by external name.
         Args:
             project_id: project where the tenant will be created - string
@@ -125,11 +125,11 @@ class Tenant:
         Returns:
             None - If tenant is not found.
         """
-        logger.debug("CALLED: delete_tenant({},{},{} by {})".format(project_id,external_id,forced,inspect.currentframe().f_back.f_code.co_name))
+        logger.debug("CALLED: delete_tenant({},{},{} by {})".format(project_id,external_id,force,inspect.currentframe().f_back.f_code.co_name))
         try:
             db = cts_db.DB().connection
             client = self.client()
-            if forced:
+            if force:
                 all_tenants = self.get_tenant(project_id=project_id,all=True)
                 for tenant in all_tenants:
                     if tenant.external_id == external_id:

@@ -47,7 +47,7 @@ class cts_cli:
         parser_tenant_delete = subparsers_tenant.add_parser("delete",help="Delete a CTS tenant.")
         parser_tenant_delete.add_argument("--project_id",help="Project id of the CTS instance.",default=config.APP['gcp_project'])
         parser_tenant_delete.add_argument("--external_id",help="Unique human-friendly, external name of the tenant.",required=True)
-        parser_tenant_delete.add_argument("--forced",help="Force a check on the cloud and delete the tenant. Use this if the client \
+        parser_tenant_delete.add_argument("--force",help="Force a check on the cloud and delete the tenant. Use this if the client \
             and the cloud are out of sync.",action='store_true')
         # Tenant Show Parser
         parser_tenant_show = subparsers_tenant.add_parser("show",help="Show details of a CTS tenant.")
@@ -76,7 +76,7 @@ class cts_cli:
         company_delete_mutex_args = parser_company_delete.add_mutually_exclusive_group(required=True)
         company_delete_mutex_args.add_argument("--external_id",help="Unique human-friendly, external name of the company.")
         company_delete_mutex_args.add_argument("--all",help="Unique human-friendly, external name of the tenant.",action='store_true')
-        parser_company_delete.add_argument("--forced",help="Force a check on the cloud and delete the tenant. \
+        parser_company_delete.add_argument("--force",help="Force a check on the cloud and delete the tenant. \
             Use this if the client and the cloud are out of sync.",action='store_true')
         # Company Show Parser
         parser_company_show = subparsers_company.add_parser("show",help="Show details of a CTS company.")
@@ -98,7 +98,8 @@ class cts_cli:
             If not provided, this will be created under default tenant.")
         job_create_mutex_args = parser_job_create.add_mutually_exclusive_group(required=True)
         job_create_mutex_args.add_argument("--job",help="Job object. Mandatory attributes: \
-            {\"external_id\":\"<external id>\"}",type=json_loads)          
+            {\"company\":\"<company_id>\",\"requisition_id\":\"<external id>\",\"title\":\"<title>\",\"description\":\"<description>\",\
+                \"language_code\":\"<language_code>\"}",type=json_loads)          
         job_create_mutex_args.add_argument("--file",help="Path to the file to be loaded in batch mode.")
 
         # Job Delete Parser
@@ -112,8 +113,8 @@ class cts_cli:
         job_delete_mutex_args.add_argument("--all",help="Unique human-friendly, external name of the tenant.",action='store_true')
         parser_job_delete.add_argument("--language",help="BCP-47 Standard language code of the job, such as “en-US” or “sr-Latn”. \
             If a language code is provided along with the external_id, it will uniquely identify a job listing. Multiple languages \
-                can be provided as a comma separated list. Default: 'en-US'.",default='en-US')
-        parser_job_delete.add_argument("--forced",help="Force a check on the cloud and delete the tenant. \
+                can be provided as a comma separated list. Default: App default or 'en-US'.",default=config.APP['default_language'] or 'en-US')
+        parser_job_delete.add_argument("--force",help="Force a check on the cloud and delete the tenant. \
             Use this if the client and the cloud are out of sync.",action='store_true')
 
         # Job Show Parser
@@ -126,7 +127,7 @@ class cts_cli:
             this, it will uniquely identify a job listing.",required=True)
         parser_job_show.add_argument("--language",help="BCP-47 Standard language code of the job, such as “en-US” or “sr-Latn”. \
             If a language code is provided along with the external_id, it will uniquely identify a job listing. Multiple languages \
-                can be provided as a comma separated list. Default: 'en-US'.",default='en-US')
+                can be provided as a comma separated list. Default: App default or 'en-US'.",default=config.APP['default_language'] or 'en-US')
 
         #Job List Parser
         parser_job_list = subparsers_job.add_parser("list",help="List all CTS companies in a tenant.")
@@ -154,7 +155,7 @@ class cts_cli:
                     raise ValueError("Misconfigured or missing project ID.") 
                     exit(1)
                 else:
-                    tenant.delete_tenant(args.project_id,args.external_id,args.forced)
+                    tenant.delete_tenant(args.project_id,args.external_id,args.force)
             elif args.operation == 'show':
                 if args.project_id is None or args.project_id == "":
                     raise ValueError("Misconfigured or missing project ID.") 
@@ -192,7 +193,7 @@ class cts_cli:
                     raise ValueError("Misconfigured or missing project ID.") 
                     exit(1)
                 else:
-                    company.delete_company(project_id=args.project_id,tenant_id=args.tenant_id,external_id=args.external_id,all=args.all,forced=args.forced)
+                    company.delete_company(project_id=args.project_id,tenant_id=args.tenant_id,external_id=args.external_id,all=args.all,force=args.force)
             elif args.operation == 'show':
                 if args.project_id is None or args.project_id == "":
                     raise ValueError("Misconfigured or missing project ID.") 
@@ -243,7 +244,7 @@ class cts_cli:
                     exit(1)
                 else:
                     job.delete_job(project_id=args.project_id,company_id=args.company_id,tenant_id=args.tenant_id,\
-                        external_id=args.external_id,languages=args.language,all=args.all,forced=args.forced)
+                        external_id=args.external_id,languages=args.language,all=args.all,force=args.force)
             elif args.operation == 'show':
                 if args.project_id is None or args.project_id == "":
                     raise ValueError("Misconfigured or missing project ID.") 
@@ -264,7 +265,7 @@ class cts_cli:
                     else:
                         for job in jobs:
                             print (job)
-                        print("Total {} jobs returned.".format(len(jobs)))
+                        print("Total jobs returned: {}".format(len(jobs)))
         except Exception as e:
             logging.exception(e)
 

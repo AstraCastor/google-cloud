@@ -94,8 +94,8 @@ class Company:
                         raise Exception("Error when syncing company {} to DB.".format(sync_company.external_id))
                 except Exception as e:
                      company_errors.append(e)
-            print("{} Companies created.".format(company_count))
             logger.debug("Total companies created: {}".format(company_count))
+            print("Total companies created: {}".format(company_count))
             if company_errors:
                 raise Exception(company_errors)
         except ValueError:
@@ -110,10 +110,10 @@ class Company:
         except Exception as e:
             logger.error("{}:Error creating company:\n{}\n{}".format(inspect.currentframe().f_code.co_name,company_object,e),\
                 exc_info=config.LOGGING['traceback'])
-            self.delete_company(project_id,tenant_id,company_object['external_id'],forced=True)
+            self.delete_company(project_id,tenant_id,company_object['external_id'],force=True)
             raise
 
-    def delete_company(self,project_id,tenant_id=None,external_id=None,all=False,forced=False):
+    def delete_company(self,project_id,tenant_id=None,external_id=None,all=False,force=False):
         """ Delete a CTS company by external name.
         Args:
             project_id: project where the company will be created - string
@@ -121,12 +121,12 @@ class Company:
         Returns:
             None - If company is not found.
         """
-        logger.debug("CALLED: delete_company({},{},{},{},{} by {})".format(project_id,tenant_id,external_id,all,forced,\
+        logger.debug("CALLED: delete_company({},{},{},{},{} by {})".format(project_id,tenant_id,external_id,all,force,\
             inspect.currentframe().f_back.f_code.co_name))
         try:
             db = cts_db.DB().connection
             client = self.client()  
-            if forced:
+            if force:
                 # Get all the companies from the server directly - get_company(all,scope=full) gets everything from the server directly
                 all_companies = self.get_company(project_id=project_id,tenant_id=tenant_id,all=True)
                 logger.debug("Total companies retrieved: {}".format(len(all_companies)))
