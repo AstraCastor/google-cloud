@@ -19,16 +19,7 @@ from modules.cts_errors import UnparseableJobError
 logger = logging.getLogger()
 
 class Job():
-    def __init__(self,name=None,company=None,requisition_id=None,language_code=None):
-        try:
-            self.name = name
-            self.company=company
-            self.requisition_id=requisition_id
-            self.language_code=language_code
-            logging.debug("Job instantiated.")
-        except Exception as e:
-            logging.error("Error instantiating Job. Message: {}".format(e),exc_info=config.LOGGING['traceback'])
-    
+
     def client(self):
         logger.setLevel(logging.DEBUG)
         credential_file = config.APP['secret_key']
@@ -43,9 +34,9 @@ class Job():
             client = self.client()
             #Prepare Request Metadata
             # TODO:Replace with config 
-            job_req_metadata = {}
-            job_req_metadata['user_id']='test2'
-            job_req_metadata['session_id']='test2'            
+            job_req_metadata = config.APP['request_metadata']
+            # job_req_metadata['user_id']='test2'
+            # job_req_metadata['session_id']='test2'            
             logger.debug("Setting request Metadata to {}".format(job_req_metadata))
 
             # Create a single job. If no file arg is provided a job string is required as input.
@@ -53,13 +44,13 @@ class Job():
                 try:
                     company_id = input_job['company']
                     external_id = input_job['requisition_id']
-                    language = input_job['language_code']
+                    language = input_job['language_code'] or config.APP['default_language']
                     existing_job = self.get_job(project_id=project_id,company_id=company_id,\
                         tenant_id=tenant_id,external_id=external_id,languages=language,\
                             scope='limited')
                     if existing_job is not None:
-                        print("Job requisition ID {} already exists for the given parameters.".format(external_id))
-                        logger.debug("Job requisition ID {} already exists for the given parameters.".format(external_id))
+                        print("Job {} already exists for the given parameters.".format(external_id))
+                        logger.debug("Job {} already exists for the given parameters.".format(external_id))
                     else:
                         logger.debug("create_job: Parsing job string: {}".format(input_job))
                         parsed_job = cts_helper.parse_job(project_id=project_id,tenant_id=tenant_id,jobs=[input_job])[0]
@@ -101,6 +92,8 @@ class Job():
                     logger.debug("Reading input file from {}".format(file))
                     #TODO: Replace with a config param
                     batch_size = config.BATCH_PROCESS['batch_size'] or 200
+                    conc_batches = config.BATCH_PROCESS['concurrent_batches'] or 1
+
                     #TODO: Replace with a batch_info object to unify all the batch output metrics.
                     # batch_info[batch_id]={"start":starting_line,"end":ending_line,"input":"","posted":"",\
                     # "operation":"","created":"","errors":[]}
@@ -132,11 +125,11 @@ class Job():
                             logger.debug("Batch {}: {} jobs created.".format(batch_id,job_count))
                             total_jobs_created += job_count
 
-                    logger.debug("Batching the file to be posted...")
+                    logger.debug("Batching the file @ {} rows in {} concurrent batches to be posted".format(batch_size,conc_batches))
                     # Generate the batches to be posted
                     batch_ops = {}
                     batch_errors={}
-                    for concurrent_batch in cts_helper.generate_file_batch(file=file,rows=batch_size,concurrent_batches=1):
+                    for concurrent_batch in cts_helper.generate_file_batch(file=file,rows=batch_size,concurrent_batches=conc_batches):
                         for batch in concurrent_batch:
                             try:
                                 batch_id,jobs = batch.popitem()
@@ -220,7 +213,7 @@ class Job():
     def update_job(self,tenant_id,project_id=None,job=None,file=None):
         print ("update job") if file is None else print ("batch update job")
     
-    def delete_job(self,project_id,tenant_id=None,company_id=None,external_id=None,languages="en-US",all=False,forced=False):
+    def delete_job(self,project_id,tenant_id=None,company_id=None,external_id=None,languages=config.APP['default_language'] or "en-US",all=False,force=False):
         """ Delete a CTS company by external name.
         Args:
             project_id: project where the company will be created - string
@@ -229,54 +222,63 @@ class Job():
             None - If company is not found.
         """
         logger.debug("CALLED: delete_job({},{},{},{},{},{},{} by {})".format(project_id,tenant_id,company_id,\
-            external_id,languages,all,forced,inspect.currentframe().f_back.f_code.co_name))
+            external_id,languages,all,force,inspect.currentframe().f_back.f_code.co_name))
         try:
             db = cts_db.DB().connection
             client = self.client()  
 
-            if external_id is not None:
-                # Single job or multiple languages delete
-                if forced:
+            if external_id:
+                # One or more languages delete
+                if force:
                     # If DB is out of sync with the server, get all the jobs for a company from the server directly
                     # and loop through the list to find the job 
                     # get_job(all,scope=full) gets everything from the server directly for a given company
-                    all_jobs = self.get_job(project_id=project_id,tenant_id=tenant_id,company_id=company_id, status='ALL', all=True)
+                    all_jobs = self.get_job(project_id=project_id,tenant_id=tenant_id,company_id=company_id, status='ALL', all=True,scope='full')
                     logger.debug("Total jobs retrieved: {}".format(len(all_jobs)))
                     if languages == 'ALL':
                         existing_jobs = [job for job in all_jobs if job.requisition_id == external_id]
                     else:
                         lang_list = [str(l) for l in languages.split(',')]
                         existing_jobs = [job for job in all_jobs if job.requisition_id == external_id and job.language_code in lang_list]
+                    
                 else:
                     # Deleting specific jobs by external_id and language_code
                     logger.debug("Calling get_job({},{},{},{},{},{})".format(project_id,tenant_id,company_id,external_id,languages,'limited'))
                     existing_jobs = self.get_job(project_id=project_id,company_id=company_id,tenant_id=tenant_id,\
                         external_id=external_id,languages=languages,scope='limited')
                     logger.debug("Existing job? {}".format(existing_jobs))
-                
-                if existing_jobs:
-                    for job in existing_jobs:
-                        logger.info("Deleting job id {}: {} for company {}".format(job.requisition_id,job.language_code, company_id))
-                        client.delete_job(job.name)
-                        db.execute("DELETE FROM job where job_name = ?",(job.name,))
-                        logger.info("Job {}:{} deleted for company {}.".format(external_id,job.language_code,company_id))
-                        print("Job {}:{} deleted for company {}.".format(external_id,job.language_code,company_id))
-                else:
-                    logger.warning("Job {} for company {} does not exist.".format(external_id,company_id))
-                    return None
             else:
                 # If job external_id (requisition_id) is not provided, bulk delete
                 existing_jobs = self.get_job(project_id=project_id,company_id=company_id,tenant_id=tenant_id,all=True,scope='limited')
 
-                if len(all_jobs) != 0:
-                    for job in all_companies:
-                        if company.external_id == external_id:
-                            existing_company = company
-                            break
-                        else:
-                            existing_company = None
+            if existing_jobs:
+                confirmation = cts_helper.user_confirm("{} job(s) from {} will be deleted in {} tenant. Confirm (y/n/Enter):"\
+                    .format(len(existing_jobs),company_id,tenant_id or 'DEFAULT'))
+                if confirmation: 
+                    logger.debug("User confirmation: {}".format(confirmation))
+                    deleted = 0
+                    for job in existing_jobs:
+                        try:
+                            logger.info("Deleting job id {}: {} for company {}".format(job.requisition_id,job.language_code, company_id))
+                            client.delete_job(job.name)
+                            db.execute("DELETE FROM job where job_name = ?",(job.name,))
+                            logger.info("Job {}:{} deleted for company {}.".format(job.requisition_id,job.language_code,company_id))
+                            print("Job {}:{} deleted for company {}.".format(job.requisition_id,job.language_code,company_id))
+                            deleted += 1
+                            print("Deleted {} of {} jobs".format(deleted,len(existing_jobs)))
+                        except GoogleAPICallError as e:
+                            logger.error("API error when deleting job {}:{} for company {}. Message: {}".format(job.requisition_id,\
+                                job.language_code,company_id,e))
+                        except Exception as e:
+                            logger.error("Error when deleting job {}:{} for company {}. Message: {}".format(job.requisition_id,\
+                                job.language_code,company_id,e))                            
+                    print("Total jobs deleted: {}".format(deleted))
+                    logger.info("Total jobs deleted: {}".format(deleted))
                 else:
-                    existing_company = None
+                    print ("Aborted.")
+            else:
+                logger.warning("Job {} for company {} does not exist.".format(external_id,company_id))
+                return None
 
         except ValueError:
             logger.error("Invalid Parameters")
@@ -288,7 +290,7 @@ class Job():
             raise
 
 
-    def get_job(self,project_id,company_id,tenant_id=None,external_id=None,languages='en-US',status='OPEN',all=False,scope='full'):
+    def get_job(self,project_id,company_id,tenant_id=None,external_id=None,languages=config.APP['default_language'],status='OPEN',all=False,scope='full'):
         """ Get CTS job by name or get all CTS jobs by project.
         Args:
             project_id: Project where the job will be created - string
@@ -415,15 +417,23 @@ class Job():
 
             # After one of the SQL statements execute, get all the rows and return the processed data.    
             rows = db.fetchall()
-            logger.debug("Looked up {} jobs from DB".format(len(rows)))
+            logger.debug("Jobs from DB: {}".format(len(rows)))
             if rows == []:
                 return None
             else:
                 if scope=='limited':
-                    jobs = [Job(name=row[0],requisition_id=row[1],language_code=row[2],company=row[3]) for row in rows]
+                    # jobs = [Job(name=row[0],requisition_id=row[1],language_code=row[2],company=row[3]) for row in rows]
+                    jobs = []
+                    for row in rows:
+                        job = CTS_Job()
+                        job.name = row[0]
+                        job.requisition_id=row[1]
+                        job.language_code=row[2]
+                        job.company=row[3]
+                        jobs.append(job)
                 else:
                     jobs = [client.get_job(row[0]) for row in rows]
-                logger.info("Retrieved {} jobs from CTS.".format(len(jobs)))
+                logger.info("Jobs retrieved from CTS: {}".format(len(jobs)))
                 return jobs     
 
         except Exception as e:
