@@ -4,6 +4,8 @@ import os
 import sys
 import logging
 import argparse
+
+from google.protobuf import json_format
 from conf import config
 from json import loads as json_loads
 from modules import cts_tenant,cts_company,cts_job
@@ -83,7 +85,7 @@ class cts_cli:
         parser_company_show.add_argument("--project_id",help="Project id of the CTS instance.",default=config.APP['gcp_project'])
         parser_company_show.add_argument("--tenant_id",help="Unique human-friendly, external id of the tenant. \
             If not provided, this will be created under default tenant.")
-        parser_company_show.add_argument("--external_id",help="Unique human-friendly, external name of the company.",required=True)
+        parser_company_show.add_argument("--external_id",help="Unique human-friendly, external name of the company. Supports multiple company external ids separated by comma.",required=True)
         # Company List Parser
         parser_company_list = subparsers_company.add_parser("list",help="List all CTS companies in a tenant.")
         parser_company_list.add_argument("--project_id",help="Project id of the CTS instance.",default=config.APP['gcp_project'])
@@ -187,7 +189,14 @@ class cts_cli:
                     raise ValueError("Misconfigured or missing project ID.") 
                     exit(1)
                 else:
-                    company.create_company(project_id=args.project_id,tenant_id=args.tenant_id,company=args.company,file=args.file)
+                    new_companies = company.create_company(project_id=args.project_id,tenant_id=args.tenant_id,company=args.company,file=args.file)
+                    if new_companies:
+                        for c in new_companies:
+                            print("\n{}".format(json_format.MessageToJson(c)))
+                        print("Total companies created: {}".format(len(new_companies)))
+                    else:
+                        print("No companies were created.")
+
             elif args.operation == 'delete':
                 if args.project_id is None or args.project_id == "":
                     raise ValueError("Misconfigured or missing project ID.") 
@@ -206,11 +215,11 @@ class cts_cli:
                             if any(existing_company.external_id == id for existing_company in existing_companies):
                                 for existing_company in existing_companies:
                                     if existing_company.external_id==id:
-                                        print(existing_company)
+                                        print("\n{}".format(json_format.MessageToJson(existing_company)))
                             else:
-                                print("Company {} not found.".format(id))                        
+                                print("\nCompany {} not found.".format(id))                        
                     else:
-                        print(["No companies found: {}".format(args.external_id)])
+                        print("No companies found: {}".format(args.external_id))
             elif args.operation == 'list':
                 if args.project_id is None or args.project_id == "":
                     raise ValueError("Misconfigured or missing project ID.") 
@@ -222,7 +231,7 @@ class cts_cli:
                             else print ("No companies found in project {} and tenant {}.".format(args.project_id,args.tenant_id))
                     else:
                         for company in companies:
-                            print (company)
+                            print("\n{}".format(json_format.MessageToJson(company)))
         except Exception as e:
             logging.exception(e)
 

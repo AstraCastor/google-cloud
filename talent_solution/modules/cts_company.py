@@ -36,8 +36,8 @@ class Company:
                 companies = [company]
             else:
                 companies = cts_helper.generate_file_batch(file=file,rows=1)
-            company_count = 0
             company_errors = []
+            new_companies = []
             for c in companies:
                 try:
                     if file:
@@ -61,7 +61,7 @@ class Company:
                             tenant_obj = tenant.get_tenant(project_id,tenant_id,scope='limited')
                             logger.debug("Tenant retrieved:\n{}".format(tenant_obj))
                             if tenant_obj is None:
-                                logging.error("Unknown Tenant: {}".format(tenant_id),exc_info=config.LOGGING['traceback'])
+                                logging.error("Unknown Tenant: {}".format(tenant_id))
                                 exit(1)
                             parent = tenant_obj.name
                             tenant_name = tenant_obj.name
@@ -72,15 +72,12 @@ class Company:
                         new_company = client.create_company(parent,company_object)
                         if cts_db.persist_to_db(new_company,project_id=project_id,tenant_id=tenant_id):
                             logger.info("Company {} created.\n{}".format(external_id,new_company))
-                            print("Company {} created.\n{}".format(external_id,new_company))
-                            # return new_company
+                            new_companies.append(new_company)
                         else:
                             raise("Error when persisting company {} to DB.".format(new_company.external_id))
-                        company_count += 1
                     else:
                         logger.warning("Company {} already exists.\n{}".format(external_id,existing_company))
                         # return None
-
                 except AlreadyExists as e:                    
                     logger.warning("Company {} exists in server. Creating local record..".format(company_object))
                     # Sync with DB if it doesn't exist in DB
@@ -94,8 +91,6 @@ class Company:
                         raise Exception("Error when syncing company {} to DB.".format(sync_company.external_id))
                 except Exception as e:
                      company_errors.append(e)
-            logger.debug("Total companies created: {}".format(company_count))
-            print("Total companies created: {}".format(company_count))
             if company_errors:
                 raise Exception(company_errors)
         except ValueError:
@@ -110,8 +105,10 @@ class Company:
         except Exception as e:
             logger.error("{}:Error creating company:\n{}\n{}".format(inspect.currentframe().f_code.co_name,company_object,e),\
                 exc_info=config.LOGGING['traceback'])
-            self.delete_company(project_id,tenant_id,company_object['external_id'],force=True)
             raise
+        finally:
+            return new_companies if new_companies else None
+            logger.debug("Total companies created: {}".format(len(new_companies)))
 
     def delete_company(self,project_id,tenant_id=None,external_id=None,all=False,force=False):
         """ Delete a CTS company by external name.
@@ -194,7 +191,6 @@ class Company:
                     .format(",".join("?"*len(company_keys))),company_keys)
                 rows = db.fetchall()
                 if rows == []:
-                    print("Company ID(s) not found: {}".format(external_id))
                     return None
                 else:
                     logger.debug("db lookup:{}".format(rows))
@@ -213,7 +209,7 @@ class Company:
                         logger.debug("Company show operation - scope full: {}".format(lookedup_companies))
                 if len(company_ids)!=len(lookedup_companies):
                     lookedup_ids = [lc.external_id for lc in lookedup_companies]
-                    raise UnknownCompanyError("Missing or unknown company ID(s): {}".format(set(company_ids) - set(lookedup_ids)))
+                    logger.warning("Missing or unknown company ID(s): {}".format(set(company_ids) - set(lookedup_ids)))
 
             # It's a list all operation
             elif all:
@@ -222,8 +218,7 @@ class Company:
                     tenant_obj = tenant.get_tenant(project_id,tenant_id,scope='limited')
                     logger.debug("{}:Tenant retrieved:\n{}".format(inspect.currentframe().f_code.co_name,tenant_obj))
                     if tenant_obj is None:
-                        logger.error("{}:Unknown Tenant: {}".format(inspect.currentframe().f_code.co_name,tenant_id),\
-                            exc_info=config.LOGGING['traceback'])
+                        logger.error("Unknown Tenant: {}".format(tenant_id))
                         exit(1)
                     parent = tenant_obj.name
                 else:
