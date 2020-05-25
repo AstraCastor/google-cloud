@@ -147,7 +147,7 @@ class Company:
                 db.execute("DELETE FROM company where company_name = ?",(existing_company[0].name,))
                 logger.info("Company {} deleted.".format(external_id))
                 print("Company {} deleted.".format(external_id))
-
+                exit(0)
             else:
                 logger.error("{}: Company {} does not exist.".format(inspect.currentframe().f_code.co_name,external_id),\
                     exc_info=config.LOGGING['traceback'])

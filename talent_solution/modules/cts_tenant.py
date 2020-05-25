@@ -15,15 +15,7 @@ from conf import config as config
 logger = logging.getLogger()
 
 class Tenant:
-
-    def __init__(self,external_id=None,name=None):
-        try:
-            self.external_id = external_id
-            self.name = name
-            logging.debug("Tenant instantiated.")
-        except Exception as e:
-            logging.error("Error instantiating Tenant. Message: {}".format(e),exc_info=config.LOGGING['traceback'])
-    
+   
     def client(self):
         try:
             credential_file = config.APP['secret_key']
@@ -92,7 +84,7 @@ class Tenant:
                 new_tenant = client.create_tenant(parent,tenant_object)
                 if cts_db.persist_to_db(new_tenant,project_id):
                     logger.info("Tenant {} created.\n{}".format(external_id,new_tenant))
-                    print("Tenant {} created.\n{}".format(external_id,new_tenant))
+                    print("Tenant {} created.".format(external_id))
                     return new_tenant
                 else:
                     raise Exception("Error when persisting tenant {} to DB.".format(external_id))
@@ -147,6 +139,7 @@ class Tenant:
                 db.execute("DELETE FROM tenant where external_id = ?",(existing_tenant.external_id,))
                 logger.info("Tenant {} deleted.".format(external_id))
                 print("Tenant {} deleted.".format(external_id))
+                exit(0)
             else:
                 logger.warning("Tenant {} does not exist.".format(external_id,existing_tenant))
                 return None
