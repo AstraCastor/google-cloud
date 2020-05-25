@@ -33,10 +33,7 @@ class Job():
         try:
             client = self.client()
             #Prepare Request Metadata
-            # TODO:Replace with config 
-            job_req_metadata = config.APP['request_metadata']
-            # job_req_metadata['user_id']='test2'
-            # job_req_metadata['session_id']='test2'            
+            job_req_metadata = config.APP['request_metadata']           
             logger.debug("Setting request Metadata to {}".format(job_req_metadata))
 
             # Create a single job. If no file arg is provided a job string is required as input.
@@ -62,7 +59,8 @@ class Job():
                         new_job = client.create_job(parent,parsed_job,metadata=[job_req_metadata])
                         if new_job is not None:
                             if cts_db.persist_to_db(object=new_job,project_id=project_id,tenant_id=tenant_id,company_id=company_id):
-                                print ("Created job requisition ID {} for company {}.".format(input_job.requisition_id,company_id))
+                                return new_job
+                                # print ("Created job requisition ID {} for company {}.".format(input_job.requisition_id,company_id))
                         else:
                             raise
                         
@@ -81,16 +79,18 @@ class Job():
                         raise Exception("Error when syncing job requisition ID {} for company {} to DB.".format(sync_job.requisition_id))
                 except ValueError:
                     logger.error("Invalid Parameters")
+                    return None
                 except GoogleAPICallError as e:
                     logger.error("API error when creating job. Message: {}".format(e))
+                    return None
                 except Exception as e:
                     logger.error("Error when creating job. Message: {}".format(e))
+                    return None
 
             # Create a batch of jobs. Job strings are provided in a new line delimited JSON file as input.
             else:                
                 if os.path.exists(file):
                     logger.debug("Reading input file from {}".format(file))
-                    #TODO: Replace with a config param
                     batch_size = config.BATCH_PROCESS['batch_size'] or 200
                     conc_batches = config.BATCH_PROCESS['concurrent_batches'] or 1
 
@@ -192,16 +192,19 @@ class Job():
                         logger.debug("Batch ID {} Status: {}".format(id,batch_ops[id].metadata.state))
 
                     print("Total Jobs created: {}".format(total_jobs_created))
+                    #Check all the batches for errors: batch_errors = {batch_id:errors[]}
                     for errors in batch_errors.values():
                         if errors:
                             raise Exception(batch_errors)
+                            return None
+                    return True
                 else:
                     raise FileNotFoundError("Missing input file.")
 
         except ValueError:
             logger.error("Invalid Parameters")
         except GoogleAPICallError as e:
-            logger.error("API error when creating job. Message: {}".format(e))
+            logger.error("API error when creating job {}. Message: {}".format(e))
         except Exception as e:
             if input_job:
                 logger.error("Error creating job:\n{}\nMessage:{}".format(input_job,e),exc_info=config.LOGGING['traceback'])
@@ -325,10 +328,9 @@ class Job():
                         if tenant_id is not None:
                             tenant = cts_tenant.Tenant()
                             tenant_obj = tenant.get_tenant(project_id,tenant_id,scope='limited')
-                            logger.debug("Tenant set to: {}".format(tenant_obj))
+                            logger.debug("Tenant set to:\n {}".format(tenant_obj))
                             if tenant_obj is None:
-                                logging.error("Unknown tenant input: {}".format(tenant_id),\
-                                    exc_info=config.LOGGING['traceback'])
+                                logger.error("Unknown tenant: {}".format(tenant_id))
                                 exit(1)
                             parent = tenant_obj.name
                         else:
@@ -340,10 +342,9 @@ class Job():
 
                         # Look up company resource path for filtering
                         company = cts_company.Company().get_company(project_id=project_id,tenant_id=tenant_id,external_id=company_id,scope='limited')
-                        logger.debug("Company retrieved: {}".format(company))
+                        logger.debug("Company retrieved:\n {}".format(company))
                         if company is None:
-                            logging.error("Unknown company: {}. Company is a mandatory attribute for a job listing, create the company \
-                                before creating or looking up job listings.".format(company_id))
+                            logger.error("Unknown company: {}. Company is a mandatory attribute for a job listing, create the company before creating or looking up job listings.".format(company_id))
                             exit(1)
                         else:
                             filter_ = filter_ + " AND companyName = \"{}\"".format(company[0].name)

@@ -247,6 +247,12 @@ class cts_cli:
                 else:
                     new_job = job.create_job(project_id=args.project_id,tenant_id=args.tenant_id,input_job=args.job,\
                         file=args.file)
+                    # create_job returns True for successful batch completion and job object for interactive job creation
+                    # It will return None in case of an error
+                    if new_job and new_job != True:
+                            print("\n{}".format(json_format.MessageToJson(new_job)))
+                    else:
+                        exit(1)
             elif args.operation == 'delete':
                 if args.project_id is None or args.project_id == "":
                     raise ValueError("Misconfigured or missing project ID.") 
@@ -273,7 +279,7 @@ class cts_cli:
                             else print ("No jobs found in project {}, tenant {} and company {}.".format(args.project_id,args.tenant_id,args.company_id))
                     else:
                         for job in jobs:
-                            print (job)
+                            print("\n{}".format(json_format.MessageToJson(job)))
                         print("Total jobs returned: {}".format(len(jobs)))
         except Exception as e:
             logging.exception(e)
