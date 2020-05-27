@@ -109,7 +109,7 @@ def parse_job(project_id,tenant_id,jobs=[]):
                         else: 
                             del(job['custom_attributes'][attr])
                     elif 'long_values' in job['custom_attributes'][attr]:
-                        if job['custom_attributes'][attr]['string_values'] != [""] and job['custom_attributes'][attr]['string_values'] is not None:
+                        if job['custom_attributes'][attr]['long_values'] != [""] and job['custom_attributes'][attr]['long_values'] is not None:
                             job['custom_attributes'][attr]=CustomAttribute(long_values=job['custom_attributes'][attr]['long_values'],filterable=job['custom_attributes'][attr]['filterable'])
                         else: 
                             del(job['custom_attributes'][attr])

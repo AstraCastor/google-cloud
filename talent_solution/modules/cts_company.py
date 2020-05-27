@@ -5,11 +5,10 @@ from google.cloud.talent_v4beta1.types import Company as CTS_Company
 import os
 import sys
 import logging
-import argparse
 import inspect
 import re
 import json
-from datetime import datetime
+
 from modules import cts_db,cts_tenant,cts_helper
 from modules.cts_errors import UnknownCompanyError
 from modules.cts_helper import get_parent
@@ -43,6 +42,7 @@ class Company:
                     if file:
                         line,company_batch_item = c[0].popitem()
                         company_object = company_batch_item.pop()
+                        logger.info("Creating company {} from line {}...".format(company_object.external_id,line))
                     else:
                         company_object = c
                     if isinstance(company_object,str):
@@ -71,8 +71,10 @@ class Company:
                         logger.debug("Parent path set to: {}".format(parent))
                         new_company = client.create_company(parent,company_object)
                         if cts_db.persist_to_db(new_company,project_id=project_id,tenant_id=tenant_id):
-                            logger.info("Company {} created.\n{}".format(external_id,new_company))
                             new_companies.append(new_company)
+                            logger.info("Company {} created.\n{}".format(external_id,new_company))
+                            if file:
+                                print("Line {}: company {} created.".format(line,external_id))
                         else:
                             raise("Error when persisting company {} to DB.".format(new_company.external_id))
                     else:
@@ -103,12 +105,14 @@ class Company:
             logger.error("API error when creating job. Message: {}".format(e))
             raise
         except Exception as e:
-            logger.error("{}:Error creating company:\n{}\n{}".format(inspect.currentframe().f_code.co_name,company_object,e),\
+            logger.error("Error creating company:\n{}\n{}".format(company_object,e),\
                 exc_info=config.LOGGING['traceback'])
             raise
         finally:
-            return new_companies if new_companies else None
             logger.debug("Total companies created: {}".format(len(new_companies)))
+            if file:
+                print("Total companies created: {}".format(len(new_companies)))
+            return new_companies if new_companies else None
 
     def delete_company(self,project_id,tenant_id=None,external_id=None,all=False,force=False):
         """ Delete a CTS company by external name.
@@ -137,10 +141,9 @@ class Company:
                 else:
                     existing_company = None
             else:
-                logger.debug("{}:Calling get_company({},{},{})".format(inspect.currentframe().f_code.co_name,project_id,\
-                    tenant_id,external_id))
+                logger.debug("Calling get_company({},{},{})".format(project_id,tenant_id,external_id))
                 existing_company = self.get_company(project_id=project_id,tenant_id=tenant_id,external_id=external_id)
-                logger.debug("{}:Existing company? {}".format(inspect.currentframe().f_code.co_name,existing_company))
+                logger.debug("Existing company? {}".format(existing_company))
             if existing_company is not None:
                 logger.info("Deleting company id: {}".format(existing_company[0].external_id))
                 client.delete_company(existing_company[0].name)
@@ -149,12 +152,12 @@ class Company:
                 print("Company {} deleted.".format(external_id))
                 exit(0)
             else:
-                logger.error("{}: Company {} does not exist.".format(inspect.currentframe().f_code.co_name,external_id),\
+                logger.error("Company {} does not exist.".format(external_id),\
                     exc_info=config.LOGGING['traceback'])
                 print("Company {} does not exist.".format(external_id))
                 return None
         except Exception as e:
-            logger.error("{}:Error deleting company {}: {}".format(inspect.currentframe().f_code.co_name,external_id,e),\
+            logger.error("Error deleting company {}: {}".format(external_id,e),\
                 exc_info=config.LOGGING['traceback'])
             raise
 
@@ -177,15 +180,15 @@ class Company:
             client = self.client()  
             if external_id is not None:
                 if all:
-                    logging.error("{}:Conflicting arguments: --external_id and --all are mutually exclusive."\
-                        .format(inspect.currentframe().f_code.co_name),exc_info=config.LOGGING['traceback'])
+                    logging.error("Conflicting arguments: --external_id and --all are mutually exclusive."\
+                        ,exc_info=config.LOGGING['traceback'])
                     raise ValueError
                 # List of company external_ids provided as args
                 company_ids = external_id.split(",")
                 # Build the DB lookup key for the company table
                 company_keys=[project_id+"-"+tenant_id+"-"+company_id if project_id is not None and tenant_id is not None \
                 else project_id+"-"+company_id for company_id in company_ids]
-                logger.debug("{}:Searching for company: {}".format(inspect.currentframe().f_code.co_name,company_keys))
+                logger.debug("Searching for company: {}".format(company_keys))
                 # Lookup companies in the DB
                 db.execute("SELECT distinct external_id,company_name FROM company where company_key in ({})"\
                     .format(",".join("?"*len(company_keys))),company_keys)
@@ -216,17 +219,17 @@ class Company:
                 if tenant_id is not None:
                     tenant = cts_tenant.Tenant()
                     tenant_obj = tenant.get_tenant(project_id,tenant_id,scope='limited')
-                    logger.debug("{}:Tenant retrieved:\n{}".format(inspect.currentframe().f_code.co_name,tenant_obj))
+                    logger.debug("Tenant retrieved:\n{}".format(tenant_obj))
                     if tenant_obj is None:
                         logger.error("Unknown Tenant: {}".format(tenant_id))
                         exit(1)
                     parent = tenant_obj.name
                 else:
                     parent = client.project_path(project_id)
-                logger.debug("{}:Parent path: {}".format(inspect.currentframe().f_code.co_name,parent))
+                logger.debug("Parent path: {}".format(parent))
+                parent = "projects/pe-cts-poc/tenants/5136f2f3-2783-4ac2-a0c7-d927a932c4dd"
                 lookedup_companies = [t for t in client.list_companies(parent)]
-                logger.debug("{}:Company list operation: {} companies returned".format(inspect.currentframe().f_code.co_name,\
-                    len(lookedup_companies)))
+                logger.debug("Company list operation: {} companies returned".format(len(lookedup_companies)))
             else:
                 logger.error("Invalid arguments.",exc_info=config.LOGGING['traceback'])
                 raise AttributeError
