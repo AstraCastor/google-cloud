@@ -42,7 +42,7 @@ class Company:
                     if file:
                         line,company_batch_item = c[0].popitem()
                         company_object = company_batch_item.pop()
-                        logger.info("Creating company {} from line {}...".format(company_object.external_id,line))
+                        logger.info("Creating company from line {}...".format(line))
                     else:
                         company_object = c
                     if isinstance(company_object,str):
@@ -92,7 +92,8 @@ class Company:
                     else:
                         raise Exception("Error when syncing company {} to DB.".format(sync_company.external_id))
                 except Exception as e:
-                     company_errors.append(e)
+                    logger.error("Company creation failed.")
+                    company_errors.append(e)
             if company_errors:
                 raise Exception(company_errors)
         except ValueError:
@@ -105,7 +106,7 @@ class Company:
             logger.error("API error when creating job. Message: {}".format(e))
             raise
         except Exception as e:
-            logger.error("Error creating company:\n{}\n{}".format(company_object,e),\
+            logger.error("Error creating company:\n{}\n{}".format(company_object or "NA",e),\
                 exc_info=config.LOGGING['traceback'])
             raise
         finally:
@@ -142,18 +143,25 @@ class Company:
                     existing_company = None
             else:
                 logger.debug("Calling get_company({},{},{})".format(project_id,tenant_id,external_id))
-                existing_company = self.get_company(project_id=project_id,tenant_id=tenant_id,external_id=external_id)
-                logger.debug("Existing company? {}".format(existing_company))
-            if existing_company is not None:
-                logger.info("Deleting company id: {}".format(existing_company[0].external_id))
-                client.delete_company(existing_company[0].name)
-                db.execute("DELETE FROM company where company_name = ?",(existing_company[0].name,))
-                logger.info("Company {} deleted.".format(external_id))
-                print("Company {} deleted.".format(external_id))
-                exit(0)
+                existing_companies = self.get_company(project_id=project_id,tenant_id=tenant_id,external_id=external_id,all=all)
+                # logger.debug("Existing company? {}".format(existing_company))
+            if existing_companies:
+                for existing_company in existing_companies:
+                    try:
+                        logger.info("Deleting company id: {}".format(existing_company.external_id))
+                        client.delete_company(existing_company.name)
+                        db.execute("DELETE FROM company where company_name = ?",(existing_company.name,))
+                        logger.info("Company {} deleted.".format(existing_company.external_id))
+                        print("Company {} deleted.".format(existing_company.external_id))
+                    except GoogleAPICallError as e:
+                        logger.error("API error when deleting job. Message: {}".format(e))
+                        raise
+                    except Exception as e:
+                        logger.error("Error deleting company:\n{}\n{}".format(existing_company,e),\
+                            exc_info=config.LOGGING['traceback'])
+                exit(0)              
             else:
-                logger.error("Company {} does not exist.".format(external_id),\
-                    exc_info=config.LOGGING['traceback'])
+                logger.warn("Company {} does not exist.".format(external_id))
                 print("Company {} does not exist.".format(external_id))
                 return None
         except Exception as e:
@@ -227,7 +235,6 @@ class Company:
                 else:
                     parent = client.project_path(project_id)
                 logger.debug("Parent path: {}".format(parent))
-                parent = "projects/pe-cts-poc/tenants/5136f2f3-2783-4ac2-a0c7-d927a932c4dd"
                 lookedup_companies = [t for t in client.list_companies(parent)]
                 logger.debug("Company list operation: {} companies returned".format(len(lookedup_companies)))
             else:
