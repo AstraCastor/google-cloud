@@ -110,7 +110,7 @@ def parse_job(project_id,tenant_id,jobs=[]):
                             del(job['custom_attributes'][attr])
                     elif 'long_values' in job['custom_attributes'][attr]:
                         if job['custom_attributes'][attr]['long_values'] != [""] and job['custom_attributes'][attr]['long_values'] is not None:
-                            job['custom_attributes'][attr]=CustomAttribute(long_values=job['custom_attributes'][attr]['long_values'],filterable=job['custom_attributes'][attr]['filterable'])
+                            job['custom_attributes'][attr]=CustomAttribute(long_values=[int(val) for val in job['custom_attributes'][attr]['long_values']],filterable=job['custom_attributes'][attr]['filterable'])
                         else: 
                             del(job['custom_attributes'][attr])
                     else:
@@ -163,7 +163,8 @@ def generate_file_batch(file,rows=5,concurrent_batches=1):
                     concurrent_batch.append({batch_id:batch})
                     yield concurrent_batch
     else:
-        raise FileNotFoundError("Missing file {}.".format(file))
+        logger.error("Missing file {}.".format(file))
+        raise FileNotFoundError
 
 def user_confirm(msg):
     while True:
