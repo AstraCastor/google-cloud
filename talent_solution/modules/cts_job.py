@@ -167,6 +167,7 @@ class Job():
                                 parent = cts_helper.get_parent(project_id,tenant_id)
                                 logger.debug("Batch {}: Parent is set to {}".format(batch_id,parent))
                                 logger.debug("Batch {}: Posting {} jobs between lines {} to {}".format(batch_id,len(parsed_jobs),starting_line,ending_line))
+                                print("Batch {}: Posting {} jobs between lines {} to {}".format(batch_id,len(parsed_jobs),starting_line,ending_line))
                                 batch_ops[batch_id]= client.batch_create_jobs(parent,parsed_jobs,metadata=[job_req_metadata])
                                 batch_ops[batch_id].add_done_callback(operation_complete)
 
@@ -256,17 +257,17 @@ class Job():
 
             if existing_jobs:
                 confirmation = cts_helper.user_confirm("{} job(s) from {} will be deleted in {} tenant. Confirm (y/n/Enter):"\
-                    .format(len(existing_jobs),company_id,tenant_id or 'DEFAULT'))
+                    .format(len(existing_jobs),company_id or "all companies",tenant_id or 'DEFAULT'))
                 if confirmation: 
                     logger.debug("User confirmation: {}".format(confirmation))
                     deleted = 0
                     for job in existing_jobs:
                         try:
-                            logger.info("Deleting job id {}: {} for company {}".format(job.requisition_id,job.language_code, company_id))
+                            logger.info("Deleting job id {}: {} for company {}".format(job.requisition_id,job.language_code, job.companyDisplayName))
                             client.delete_job(job.name)
                             db.execute("DELETE FROM job where job_name = ?",(job.name,))
-                            logger.info("Job {}:{} deleted for company {}.".format(job.requisition_id,job.language_code,company_id))
-                            print("Job {}:{} deleted for company {}.".format(job.requisition_id,job.language_code,company_id))
+                            logger.info("Job {}:{} deleted for company {}.".format(job.requisition_id,job.language_code,job.companyDisplayName))
+                            print("Job {}:{} deleted for company {}.".format(job.requisition_id,job.language_code,job.companyDisplayName))
                             deleted += 1
                             print("Deleted {} of {} jobs".format(deleted,len(existing_jobs)))
                         except GoogleAPICallError as e:
