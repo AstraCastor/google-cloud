@@ -1,0 +1,357 @@
+#!/usr/bin/env python3
+'''
+projects/pe-cts-poc/tenants/dd30d6e0-d861-49af-8538-bdfe4f056a18
+'''
+
+import os
+import sys
+import time
+import argparse
+import google.auth
+import pandas as pd
+import json
+import ast
+import re
+
+from googleapiclient.discovery import build
+from googleapiclient.errors import Error
+from google.cloud import bigquery
+from google.cloud import bigquery_storage_v1beta1
+
+
+def old_job_search(parent, keywords="", address="", distance=5.0):
+
+    request_metadata = {'allowMissingIds': True}
+
+    job_query = {}
+
+    if keywords :
+        job_query.update({'query': keywords})
+
+    if address :
+        location_filters = [
+            {
+                'address': address,
+                'distanceInMiles': distance
+            }
+        ]
+        job_query.update({"locationFilters": location_filters})
+
+    request = {
+        'searchMode': 'JOB_SEARCH',
+        'requestMetadata': request_metadata,
+        'jobQuery': job_query,
+        'pageSize': 30
+    }
+    response = client_service.projects().tenants().jobs().search(
+        parent=parent, body=request).execute()
+
+    print('Request Id: %s' %
+          response.get('metadata').get('requestId'))
+
+    if response.get('estimatedTotalSize') is not None:
+        print('Estimated Total Size: %s' %
+          response.get('estimatedTotalSize'))
+
+    if response.get('spellCorrection') is not None:
+        print('spellCorrection exists')
+        print(response.get('spellCorrection'))
+        if response.get('spellCorrection').get('corrected') is True:
+            print('Spell corrected text: %s' %
+                response.get('spellCorrection').get('correctedText'))
+        else:
+            print('No Spell Correction action')
+    else:
+            print('No Spell Correction object')
+
+    print('matching jobs:')
+    if response.get('matchingJobs') is not None:
+        for job in response.get('matchingJobs'):
+            offre = job.get('job')
+            print(offre.get('name'))
+            #print("    matchingJob.searchTextSnippet : " + str(job.get('searchTextSnippet')))
+            #print("    matchingJob.job.RequisitionId : " + str(offre.get('requisitionId')))
+            print("    matchingJob.job.title : " + str(offre.get('title')))
+            print("    matchingJob.jobTitleSnippet : " + str(job.get('jobTitleSnippet')))
+            print("    matchingJob.jobSummary : " + str(job.get('jobSummary')))
+            #print("    matchingJob.job.companyDisplayName : " + str(offre.get('companyDisplayName')))
+            print("    matchingJob.job.addresses : " + str(offre.get('addresses')[0]))
+            #print("    matchingJob.job.customAttributes : " + str(offre.get('customAttributes')))
+            #print("    matchingJob.job.jobLevel : " + str(offre.get('jobLevel')))
+    else:
+        print('No Job results')
+    print('')
+ 
+def load_PE_data():
+    global commune_df, departement_df, region_df, country_df, sdrlog_df, appellation_df, domaine_df, coderom_df
+ 
+    #test_search_tbl = bigquery.TableReference.from_string("pe-cts-poc.pe_cts_poc.test_searches")
+    #rows = bqclient.list_rows(test_search_tbl, selected_fields=[bigquery.SchemaField("conseiller_key", "INTEGER"), ],)
+    #test_search_df = rows.to_dataframe(bqstorage_client=bqstorageclient)
+    #print(test_search_df.head())
+
+    commune_tbl = bigquery.TableReference.from_string("pe-cts-poc.ATOS_Data.commune")
+    rows = bqclient.list_rows(commune_tbl, selected_fields=[bigquery.SchemaField("key", "STRING"), bigquery.SchemaField("value", "STRING"), ],)
+    commune_df = rows.to_dataframe(bqstorage_client=bqstorageclient)
+    commune_df['text'] = commune_df['value'].apply(lambda x: x.partition(' - ')[-1])
+    if args.verbose: print(commune_df.head())
+
+    departement_tbl = bigquery.TableReference.from_string("pe-cts-poc.ATOS_Data.departement")
+    rows = bqclient.list_rows(departement_tbl, selected_fields=[bigquery.SchemaField("key", "STRING"), bigquery.SchemaField("value", "STRING"), ],)
+    departement_df = rows.to_dataframe(bqstorage_client=bqstorageclient)
+    departement_df['text'] = departement_df['value'].apply(lambda x: x.partition(' - ')[-1])
+    if args.verbose: print(departement_df.head())
+
+    region_tbl = bigquery.TableReference.from_string("pe-cts-poc.ATOS_Data.region")
+    rows = bqclient.list_rows(region_tbl, selected_fields=[bigquery.SchemaField("key", "STRING"), bigquery.SchemaField("value", "STRING"), ],)
+    region_df = rows.to_dataframe(bqstorage_client=bqstorageclient)
+    region_df['text'] = region_df['value'].apply(lambda x: x.partition(' - ')[-1])
+    if args.verbose: print(region_df.head())
+
+    country_tbl = bigquery.TableReference.from_string("pe-cts-poc.ATOS_Data.pays_continent")
+    rows = bqclient.list_rows(country_tbl, selected_fields=[bigquery.SchemaField("key", "STRING"), bigquery.SchemaField("value", "STRING"), ],)
+    country_df = rows.to_dataframe(bqstorage_client=bqstorageclient)
+    country_df['text'] = country_df['value'].apply(lambda x: x.partition(' - ')[-1].partition(' (Frontalier)')[0])
+    if args.verbose: print(country_df.head())
+
+    appellation_tbl = bigquery.TableReference.from_string("pe-cts-poc.ATOS_Data.code_appellation")
+    rows = bqclient.list_rows(appellation_tbl, selected_fields=[bigquery.SchemaField("key", "STRING"), bigquery.SchemaField("value", "STRING"), ],)
+    appellation_df = rows.to_dataframe(bqstorage_client=bqstorageclient)
+    appellation_df['text'] = appellation_df['value'].apply(lambda x: x.partition(' - ')[-1])
+    if args.verbose: print(appellation_df.head())
+
+    domaine_tbl = bigquery.TableReference.from_string("pe-cts-poc.ATOS_Data.formacode")
+    rows = bqclient.list_rows(domaine_tbl, selected_fields=[bigquery.SchemaField("key", "STRING"), bigquery.SchemaField("value", "STRING"), ],)
+    domaine_df = rows.to_dataframe(bqstorage_client=bqstorageclient)
+    domaine_df['text'] = domaine_df['value'].apply(lambda x: x.partition(' - ')[-1])
+    if args.verbose: print(domaine_df.head())
+
+    coderom_tbl = bigquery.TableReference.from_string("pe-cts-poc.ATOS_Data.code_rome")
+    rows = bqclient.list_rows(coderom_tbl, selected_fields=[bigquery.SchemaField("key", "STRING"), bigquery.SchemaField("value", "STRING"), ],)
+    coderom_df = rows.to_dataframe(bqstorage_client=bqstorageclient)
+    coderom_df['text'] = coderom_df['value'].apply(lambda x: x.partition(' - ')[-1])
+    if args.verbose: print(coderom_df.head())
+
+    #sdrlog_tbl = bigquery.TableReference.from_string("pe-cts-poc.pe_cts_poc.pe_sdr_search_log")
+    #rows = bqclient.list_rows(sdrlog_tbl, selected_fields=[bigquery.SchemaField("column10", "STRING"), ],)
+    #sdrlog_df = rows.to_dataframe(bqstorage_client=bqstorageclient)
+    #print(sdrlog_df.head())
+
+    sdrlog_tbl = bigquery.TableReference.from_string("pe-cts-poc.pe_cts_poc.test_searches_extended")
+    rows = bqclient.list_rows(sdrlog_tbl, selected_fields=[bigquery.SchemaField("conseiller_key", "INTEGER"), bigquery.SchemaField("json", "STRING"), ],)
+    sdrlog_df = rows.to_dataframe(bqstorage_client=bqstorageclient)
+    if args.verbose: print(sdrlog_df.head())
+
+    #sdrlog_df['dict'] = sdrlog_df['json'].apply(json.loads)
+    #print(sdrlog_df.head())
+
+    #sdrlog_df['dict'] = sdrlog_df['json'].apply(ast.literal_eval)
+    #print(sdrlog_df.head())
+
+    #sdrlog_df['conseiller_key'] = sdrlog_df['dictobj'].apply(get('identificationClient'))
+    #print(sdrlog_df.head())
+
+
+def generate_query(sdr_dict, locale='fr-FR'):
+    job_query = {}
+    if len(locale) > 0:
+        job_query.update({'queryLanguageCode': locale})
+    if args.verbose:
+        print("Generating query from:" + str(sdr_dict))
+
+    if 'motsCles' in sdr_dict['criteres'] :
+        keywords = ""
+        for i in range(len(sdr_dict['criteres']['motsCles'])):
+            keywords = keywords + sdr_dict['criteres']['motsCles'][i] + ", "
+        keywords = keywords[0:-2]
+        job_query.update({'query': keywords})
+    if 'appellation' in sdr_dict['criteres'] :
+        keywords = appellation_df.loc[appellation_df['key'] == str(sdr_dict['criteres']['appellation']), 'text'].item()
+        job_query.update({'query': keywords})
+    if 'codeRome' in sdr_dict['criteres'] :
+        keywords = coderom_df.loc[coderom_df['key'] == sdr_dict['criteres']['codeRome'][0], 'text'].item()
+        job_query.update({'query': keywords})
+
+    if 'distance' in sdr_dict['criteres'] :
+        distance = ( sdr_dict['criteres']['distance'] + 8 ) / 1.6093
+    else:
+        distance = 5.0
+
+    if 'commune' in sdr_dict['criteres'] :
+        city = commune_df.loc[commune_df['key'] == str(sdr_dict['criteres']['commune'][0]), 'text'].item()
+        location_filters = [
+            {
+                'address': city + ", France",
+                'distanceInMiles': distance
+            }
+        ]
+        job_query.update({"locationFilters": location_filters})
+    elif 'departement' in sdr_dict['criteres'] :
+        departement = departement_df.loc[departement_df['key'] == sdr_dict['criteres']['departement'][0], 'text'].item()
+        location_filters = [
+            {
+                #'address': "département " + departement + ", France",
+                'address': departement,
+            }
+        ]
+        job_query.update({"locationFilters": location_filters})
+    elif 'region' in sdr_dict['criteres'] :
+        region = region_df.loc[region_df['key'] == sdr_dict['criteres']['region'], 'text'].item()
+        location_filters = [
+            {
+                #'address': "région " + region + ", France",
+                'address': "région " + region,
+            }
+        ]
+        job_query.update({"locationFilters": location_filters})
+    elif 'paysContinent' in sdr_dict['criteres'] :
+        country = country_df.loc[country_df['key'] == sdr_dict['criteres']['paysContinent'], 'text'].item()
+        #if country == 'Amérique': country = "USA"
+        location_filters = [
+            {
+                'address': country,
+            }
+        ]
+        job_query.update({"locationFilters": location_filters})
+    if args.verbose:
+        print(job_query)
+    return job_query
+
+
+def generate_request(job_query, mode='JOB_SEARCH', disKeywMatch=False, enaBroad=False):
+    if args.verbose:
+        print("Generating request from query:" + str(job_query))
+    request_metadata = {'allowMissingIds': True}
+    request = {
+        'searchMode': mode,
+        'requestMetadata': request_metadata,
+        'jobQuery': job_query,
+        'pageSize': 30,
+        'disableKeywordMatch': disKeywMatch,
+        'enableBroadening': enaBroad
+    }
+    return request
+
+
+def search_job(parent, request):
+    if args.verbose: print("Searching with request:" + str(request))
+    return client_service.projects().tenants().jobs().search(parent=parent, body=request).execute()
+
+def log_output(req_conseiller, request, response, file):
+
+    if response.get('spellCorrection') is not None:
+        if response.get('spellCorrection').get('corrected') is True:
+            corrected_text = response.get('spellCorrection').get('correctedText')
+    else:
+        corrected_text = ""
+
+    if request.get('jobQuery').get('locationFilters') is not None:
+        query_locationfilter = str(request.get('jobQuery').get('locationFilters')[0].get('address'))
+    else:
+        query_locationfilter = ""
+
+    if response.get('locationFilters') is not None:
+        response_locationfilter = json.dumps(response.get('locationFilters')[0])
+    else:
+        response_locationfilter = ""
+
+    if response.get('matchingJobs') is not None:
+        rank = 1
+        for job in response.get('matchingJobs'):
+            file.write(str(req_conseiller) + ";" + response.get('metadata').get('requestId') + ";")
+            file.write(str(request.get('jobQuery').get('query'))+ ";" + corrected_text + ";")
+            file.write(query_locationfilter + ";" + response_locationfilter + ";")
+            offre = job.get('job')
+            file.write(offre.get('requisitionId') + ";" + offre.get('name') + ";" + str(rank) + ";" + str(offre.get('promotionValue')) + ";")
+            file.write(offre.get('title') + ";" + offre.get('companyDisplayName') + ";" + offre.get('addresses')[0])
+            #print("    matchingJob.jobTitleSnippet : " + str(job.get('jobTitleSnippet')))
+            #print("    matchingJob.jobSummary : " + str(job.get('jobSummary')))
+            #print("    matchingJob.searchTextSnippet : " + str(job.get('searchTextSnippet')))
+            #print("    matchingJob.job.customAttributes : " + str(offre.get('customAttributes')))
+            #print("    matchingJob.job.jobLevel : " + str(offre.get('jobLevel')))
+            file.write("\n")
+            rank = rank + 1
+    else:
+        file.write(str(req_conseiller) + ";" + response.get('metadata').get('requestId') + ";")
+        file.write(str(request.get('jobQuery').get('query'))+ ";" + corrected_text + ";")
+        file.write(query_locationfilter + ";" + response_locationfilter + ";")
+        file.write(";;0;;;;\n")
+
+
+if __name__ == '__main__':
+
+    client_service = build('jobs', 'v4beta1')
+    parser = argparse.ArgumentParser(prog='ctsearch')
+    group = parser.add_mutually_exclusive_group()
+    group.add_argument("-c", "--conseiller", type=int, help="Enter a PE conseiller_key to replay the search request with that key from the loaded PE sdr log dataset")
+    group.add_argument("-b", "--batch", action='store_true', help="Replay all search request from the loaded PE sdr log dataset")
+    group.add_argument("-t", "--test", action='store_true', help="Test for a specific search request using -k and/or -a options")
+    parser.add_argument("-k", "--keywords", type=str, help="specify a string with keywords to be searched for in a test request, alongside with -t option")
+    parser.add_argument("-a", "--address", type=str, help="specify a string with address to be searched for in a test request, alongside with -t option")
+    parser.add_argument("-v", "--verbose", action='store_true')
+    parser.add_argument("-f", "--filename", type=str, help="specify a file to log the results of a batch request, alongside with -b/--batch option")
+    parser.add_argument("-n", "--nolocale", action='store_true', help="prevent using ctsearch default fr-FR locale for queries. As a result, the Job Search API default locale will be used.")
+    parser.add_argument("-d", "--diskeywmatch", action='store_true', help="Disable keyword matching.")
+    parser.add_argument("-e", "--enabroad", action='store_true', help="Enable result broadening.")
+    args = parser.parse_args()
+
+    credentials, project_id = google.auth.default(
+        scopes=["https://www.googleapis.com/auth/cloud-platform"]
+    )
+
+    try:
+        if 'TALENT_TENANT' in os.environ :
+            cts_parent = 'projects/' + project_id + '/tenants/' + os.environ['TALENT_TENANT']
+            print(cts_parent)
+        else :
+            raise NameError("ENV VAR 'TALENT_TENANT' NOT SET!")
+    except NameError:
+        raise
+
+    if args.conseiller or args.batch:
+        bqclient = bigquery.Client(
+            credentials=credentials,
+            project=project_id,
+        )
+        bqstorageclient = bigquery_storage_v1beta1.BigQueryStorageClient(
+            credentials=credentials
+        )
+        load_PE_data()
+
+    locale='' if args.nolocale else 'fr-FR'
+
+    if args.conseiller:
+        print("Replaying SDR search request #conseiller=" + str(args.conseiller))
+        sdrreq = json.loads(sdrlog_df.loc[sdrlog_df['conseiller_key'] == args.conseiller, "json"].item())
+        req_conseiller = sdrreq.get('identificationClient').get('conseiller')
+        if args.verbose:
+            print("Loading: " + str(req_conseiller) + " - " + str(sdrreq.get('criteres')) )
+            #print("       : " + str(sdrreq.get('identificationClient').get('conseiller')) + " - " + str(sdrreq.get('filtres')) )
+        job_query = generate_query(sdrreq, locale=locale)
+        request = generate_request(job_query, disKeywMatch=args.diskeywmatch, enaBroad=args.enabroad) 
+        response = search_job(cts_parent, request)
+        file = sys.stdout
+        log_output(req_conseiller, request, response, file) 
+
+    if args.batch:
+        print("Replaying all SDR search requests from the loaded SDR log dataset")
+        file = open(args.filename, 'w') if args.filename else sys.stdout
+        file.write("conseiller;requestId;query_keywords;corrected_text;query_locationFilter;response_locationFilter;pe_requisitionId;cts_jobName;response_jobRank;jobPromotionValue;jobTitle;companyName;jobAddress\n")
+        start = time.time()
+        for lab, row in sdrlog_df.iterrows() :
+            sdrreq = json.loads(row["json"])
+            req_conseiller = sdrreq.get('identificationClient').get('conseiller')
+            if args.verbose:
+                print("Loading: " + str(req_conseiller) + " - " + str(sdrreq.get('criteres')) )
+                #print("       : " + str(sdrreq.get('identificationClient').get('conseiller')) + " - " + str(sdrreq.get('filtres')) )
+            job_query = generate_query(sdrreq, locale=locale)
+            request = generate_request(job_query, disKeywMatch=args.diskeywmatch, enaBroad=args.enabroad) 
+            response = search_job(cts_parent, request)
+            log_output(req_conseiller, request, response, file) 
+        end = time.time()
+        if file is not sys.stdout: file.close()
+        print("API calls & logs batch execution time:" + str(end - start))
+
+    if args.test:
+       print("Search for a job with keywords \"" + str(args.keywords) +"\" at address \"" + str(args.address) + "\"")
+       old_job_search(cts_parent, keywords=args.keywords, address=args.address)
