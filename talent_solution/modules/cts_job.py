@@ -22,17 +22,21 @@ logger = logging.getLogger()
 class Job():
 
     def client(self):
-        if 'secret_key' in config.APP:
-            if os.path.exists(config.APP['secret_key']):
-                _job_client = talent_v4beta1.JobServiceClient\
-                    .from_service_account_file(config.APP['secret_key'])
-                logger.debug("credentials: {}".format(config.APP['secret_key']))
+        try:
+            if 'secret_key' in config.APP:
+                if os.path.exists(config.APP['secret_key']):
+                    _job_client = talent_v4beta1.JobServiceClient\
+                        .from_service_account_file(config.APP['secret_key'])
+                    logger.debug("credentials: {}".format(config.APP['secret_key']))
+                else:
+                    raise Exception("Missing credential file.")
             else:
-                raise Exception("Missing credential file.")
-        else:
-            _job_client = talent_v4beta1.JobServiceClient()
-        logger.debug("Job client created: {}".format(_job_client))
-        return _job_client
+                _job_client = talent_v4beta1.JobServiceClient()
+            logger.debug("Job client created: {}".format(_job_client))
+            return _job_client
+        except Exception as e:
+            logging.error("Error instantiating Job client. Message: {}".format(e),exc_info=config.LOGGING['traceback'])
+            exit(1)
 
     def create_job(self,project_id,tenant_id=None,input_job=None,file=None):
         logger.debug("logger:CALLED: create_job({},{},{},{})".format(project_id,tenant_id,input_job,file))

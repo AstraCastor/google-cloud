@@ -20,18 +20,22 @@ logger = logging.getLogger()
 class Company:
     
     def client(self):
-        if 'secret_key' in config.APP:
-            if os.path.exists(config.APP['secret_key']):
-                _company_client = talent_v4beta1.CompanyServiceClient\
-                    .from_service_account_file(config.APP['secret_key'])
-                logger.debug("credentials: {}".format(config.APP['secret_key']))
+        try:
+            if 'secret_key' in config.APP:
+                if os.path.exists(config.APP['secret_key']):
+                    _company_client = talent_v4beta1.CompanyServiceClient\
+                        .from_service_account_file(config.APP['secret_key'])
+                    logger.debug("credentials: {}".format(config.APP['secret_key']))
+                else:
+                    raise Exception("Missing credential file.")
             else:
-                raise Exception("Missing credential file.")
-        else:
-            _company_client = talent_v4beta1.CompanyServiceClient()
-        logger.debug("Company client created: {}".format(_company_client))
-        return _company_client
-    
+                _company_client = talent_v4beta1.CompanyServiceClient()
+            logger.debug("Company client created: {}".format(_company_client))
+            return _company_client
+
+        except Exception as e:
+            logging.error("Error instantiating Company client. Message: {}".format(e),exc_info=config.LOGGING['traceback'])
+            exit(1)
 
     def create_company(self,project_id,tenant_id=None,company=None,file=None):
         logger.debug("CALLED: create_company({},{},{},{} by {})".format(project_id,tenant_id,company,file,inspect.currentframe().f_back.f_code.co_name))

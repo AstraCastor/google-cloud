@@ -31,6 +31,7 @@ class Tenant:
             return _tenant_client
         except Exception as e:
             logging.error("Error instantiating Tenant client. Message: {}".format(e),exc_info=config.LOGGING['traceback'])
+            exit(1)
 
     def get_tenant(self,project_id,external_id=None,all=False,scope="full"):
         """ Get CTS tenant by name or get all CTS tenants by project.
