@@ -2,12 +2,13 @@ from google.cloud import talent_v4beta1
 import os
 import sys
 import logging
-import argparse
 import inspect
 import re
 import json
 from datetime import datetime
 import time
+import collections 
+
 from modules import cts_db,cts_tenant,cts_company,cts_helper
 from conf import config as config
 from google.cloud.talent_v4beta1.types import Job as CTS_Job
@@ -21,10 +22,15 @@ logger = logging.getLogger()
 class Job():
 
     def client(self):
-        logger.setLevel(logging.DEBUG)
-        credential_file = config.APP['secret_key']
-        logger.debug("credentials: {}".format(credential_file))
-        _job_client = talent_v4beta1.JobServiceClient.from_service_account_file(credential_file)
+        if 'secret_key' in config.APP:
+            if os.path.exists(config.APP['secret_key']):
+                _job_client = talent_v4beta1.JobServiceClient\
+                    .from_service_account_file(config.APP['secret_key'])
+                logger.debug("credentials: {}".format(config.APP['secret_key']))
+            else:
+                raise Exception("Missing credential file.")
+        else:
+            _job_client = talent_v4beta1.JobServiceClient()
         logger.debug("Job client created: {}".format(_job_client))
         return _job_client
 
@@ -69,11 +75,15 @@ class Job():
                 except AlreadyExists as e:
                     # Sync with DB if it doesn't exist in DB
                     logger.warning("Job already exists. Message: {}".format(e))
-                    logger.warning("Local DB out of sync. Syncing local db..")
+                    logger.info("Local DB out of sync. Syncing local db..")
+                    print("Job already exists. Message: {}".format(e))
+                    print("Local DB out of sync. Syncing local db..")
                     sync_job_name = re.search("^Job (.*) already exists.*$",e.message).group(1)
                     sync_job = client.get_job(sync_job_name)
                     if cts_db.persist_to_db(sync_job,project_id=project_id,tenant_id=tenant_id,company_id=company_id):
                         logger.warning("Job requisition ID {} for company {} synced to DB.".format(parsed_job['requisition_id'],\
+                            company_id))
+                        print("Job requisition ID {} for company {} synced to DB.".format(parsed_job['requisition_id'],\
                             company_id))
                     else:
                         raise Exception("Error when syncing job requisition ID {} for company {} to DB.".format(sync_job.requisition_id))
@@ -93,111 +103,168 @@ class Job():
                     logger.debug("Reading input file from {}".format(file))
                     batch_size = config.BATCH_PROCESS['batch_size'] or 200
                     conc_batches = config.BATCH_PROCESS['concurrent_batches'] or 1
-
-                    #TODO: Replace with a batch_info object to unify all the batch output metrics.
-                    # batch_info[batch_id]={"start":starting_line,"end":ending_line,"input":"","posted":"",\
-                    # "operation":"","created":"","errors":[]}
-                    total_jobs_created=0
-
-                    def operation_complete(operation_future):
-                        nonlocal total_jobs_created
-                        try:
-                            operation = operation_future.operation
-                            op_result = operation_future.result()
-                            for id,op in batch_ops.items():
-                                if op == operation_future:
-                                    batch_id = id 
-                            logger.debug("Batch ID {} results:\n".format(batch_id))
-                            job_count = 0
-                            for result in op_result.job_results:
-                                if result.job.requisition_id is not None and result.job.requisition_id is not "":
-                                    cts_db.persist_to_db(result.job,project_id=project_id,tenant_id=tenant_id,company_id=company_id)
-                                    logger.debug("Job {} created.".format(result.job.requisition_id))
-                                    job_count += 1
-                                else:
-                                    error_row = (batch_id-1)*batch_size+list(op_result.job_results).index(result)+1
-                                    print ("Error when creating job in row {}".format(error_row))
-                                    logger.warning("Error when creating job in row {}".format(error_row))  
-                        except Exception as e:
-                            logger.error("Error when creating jobs. Message: {}".format(e),exc_info=config.LOGGING['traceback'])
-                        else:
-                            print("Batch {}: {} jobs created.".format(batch_id,job_count))
-                            logger.debug("Batch {}: {} jobs created.".format(batch_id,job_count))
-                            total_jobs_created += job_count
-
+                    batch_info = {}
                     logger.debug("Batching the file @ {} rows in {} concurrent batches to be posted".format(batch_size,conc_batches))
                     # Generate the batches to be posted
-                    batch_ops = {}
-                    batch_errors={}
                     for concurrent_batch in cts_helper.generate_file_batch(file=file,rows=batch_size,concurrent_batches=conc_batches):
                         for batch in concurrent_batch:
                             try:
-                                batch_id,jobs = batch.popitem()
-                                batch_errors[batch_id]=[]
-                                starting_line = (batch_id-1)*batch_size+1
-                                ending_line = (batch_id-1)*batch_size
-                                # Check each job in the batch exists already and remove it from the batch
-                                for job in list(jobs):
-                                    try:
-                                        ending_line += 1 
-                                        job_json = json.loads(job)
-                                        company_id = job_json['company']
-                                        external_id = job_json['requisition_id']
-                                        language=job_json['language_code']
-                                    except AttributeError as e:
-                                        raise UnparseableJobError(e)
-                                    # Remove the already existing jobs
-                                    if self.get_job(project_id=project_id,company_id=company_id,tenant_id=tenant_id,\
-                                        external_id=external_id,languages=language,scope='limited'):
-                                        print("Skipping existing job on line {}".format(ending_line))
-                                        jobs.remove(job)
-                                # If Jobs got cleared out completely, skip the batch altogether
-                                # else parse the remaining jobs in the batch
-                                if not jobs:
-                                    print("All jobs between lines {} - {} exist already.".format(starting_line,ending_line))
-                                    logger.debug("All jobs in batch {} exist already.".format(batch_id))
-                                    continue
-                                else:
-                                    logger.debug("Batch {}: Parsing {} jobs".format(batch_id,len(jobs)))
-                                    parsed_jobs = cts_helper.parse_job(project_id=project_id,tenant_id=tenant_id,jobs=jobs)
-                                if parsed_jobs is None:
-                                    raise UnparseableJobError
-                                
-                                # Getting ready to post the batch: get the parent
-                                parent = cts_helper.get_parent(project_id,tenant_id)
-                                logger.debug("Batch {}: Parent is set to {}".format(batch_id,parent))
-                                logger.debug("Batch {}: Posting {} jobs between lines {} to {}".format(batch_id,len(parsed_jobs),starting_line,ending_line))
-                                print("Batch {}: Posting {} jobs between lines {} to {}".format(batch_id,len(parsed_jobs),starting_line,ending_line))
-                                batch_ops[batch_id]= client.batch_create_jobs(parent,parsed_jobs,metadata=[job_req_metadata])
-                                batch_ops[batch_id].add_done_callback(operation_complete)
+                                for batch_id,jobs in batch.items():
+                                    batch_info.update({batch_id:{"batch":{}}})
+                                    # Check each job in the batch exists already and remove it from the batch
+                                    parsed_jobs = collections.OrderedDict()
+                                    for line,job in jobs.items():
+                                        batch_info[batch_id]['batch'].update({line:{}})
+                                        try:
+                                            job_json = json.loads(job)
+                                            company_id = job_json['company']
+                                            external_id = job_json['requisition_id']
+                                            language=job_json['language_code']
+                                            batch_info[batch_id]['batch'].update({line:{"company":company_id,"requisition_id":external_id,\
+                                                "language_code":language}})
+                                        except (AttributeError,json.JSONDecodeError) as e:
+                                            batch_info[batch_id]['batch'].update({line:{'status':'ERROR','errors':[]}})
+                                            batch_info[batch_id]['batch'][line]['errors'].append(e)
+                                            continue
+                                        # Skip the already existing jobs
+                                        if self.get_job(project_id=project_id,company_id=company_id,tenant_id=tenant_id,\
+                                            external_id=external_id,languages=language,scope='limited'):
+                                            print("Skipping existing job on line {}".format(line))
+                                            batch_info[batch_id]['batch'][line].update({'status':'SKIPPED'})
+                                            batch_info[batch_id]['batch'][line].update({'errors':['Job already exists.']})
+                                            continue
+                                        
+                                        # Parse the job if it isn't a malformed or an existing job
+                                        parsed_job = cts_helper.parse_job(project_id=project_id,tenant_id=tenant_id,jobs=[job])
+                                        if parsed_job and 'ERROR' not in parsed_job[0]:
+                                            # returned parsed_job is a list, add to the parsed_jobs OrderedDict for the entire batch
+                                            parsed_jobs.update({line:parsed_job[0]})
+                                            logger.info("Job {}:{} for company {} parsed.".format(external_id,\
+                                                language,company_id))
+                                            batch_info[batch_id]['batch'][line].update({'status':'PARSED'})
+                                        else:
+                                            logger.warning("Parse job failed for job {}:{} for company {}: {}".format(external_id,\
+                                                language,company_id,parsed_job[0]))
+                                            print("Parse job failed for job {}:{} for company {}: {}".format(external_id,\
+                                                language,company_id,parsed_job[0]))                                            
+                                            batch_info[batch_id]['batch'][line].update({'status':'PARSE_FAILED','errors':[]})
+                                            batch_info[batch_id]['batch'][line]['errors'].append(parsed_job[0])
+                                    if parsed_jobs:
+                                        # Getting ready to post the batch: get the parent
+                                        parent = cts_helper.get_parent(project_id,tenant_id)
+                                        logger.debug("Batch {}: Parent is set to {}".format(batch_id,parent))
+                                        logger.debug("Batch {}: Posting {} jobs between lines {} to {}".format(batch_id,len(parsed_jobs),\
+                                            list(batch_info[batch_id]['batch'].keys())[0],list(batch_info[batch_id]['batch'].keys())[-1]))
+                                        print("Batch {}: Posting {} jobs between lines {} to {}".format(batch_id,len(parsed_jobs),\
+                                            list(batch_info[batch_id]['batch'].keys())[0],list(batch_info[batch_id]['batch'].keys())[-1]))
+                                        # Post the jobs
+                                        batch_info[batch_id]['operation']= client.batch_create_jobs(parent,parsed_jobs.values(),metadata=[job_req_metadata])
+                                        batch_info[batch_id]['posted'] = parsed_jobs.keys()
+                                        for posted_line in batch_info[batch_id]['posted']:
+                                            batch_info[batch_id]['batch'][posted_line]['status'] = 'POSTED'
+                                    else:
+                                        logger.warning("No jobs to post in batch {}".format(batch_id))
+                                        print("No jobs to post in batch {}".format(batch_id))
+                                        batch_info[batch_id]['done']=True
 
-                            except UnparseableJobError as e:
-                                batch_errors[batch_id].append({"message":"Unable to parse one or more jobs between lines {} and {}".format(\
-                                    starting_line,ending_line),"jobs":e
-                                    })
-                                logger.warning("Batch {}: Unable to parse one or more jobs between lines {} and {}".format(batch_id,\
-                                    starting_line,ending_line))
                             except RetryError as e:
-                                batch_errors[batch_id].append({"message":"API Retry failed due to {}.".format(e)})
+                                batch_info[batch_id]['done'] = True
+                                batch_info[batch_id]['error']= "API Retry failed due to {}.".format(e)
                                 logger.error("Batch {}: API Retry failed due to {}.".format(batch_id,e),\
                                     exc_info=config.LOGGING['traceback'])
                             except GoogleAPICallError as e:
-                                batch_errors[batch_id].append({"message":"API Retry failed due to {}.".format(e)})
+                                batch_info[batch_id]['error']="API Retry failed due to {}.".format(e)
                                 logger.error("Batch {}: CTS API Error due to {}".format(batch_id,e),\
                                     exc_info=config.LOGGING['traceback'])
 
-                    for id,op in batch_ops.items():
-                        while not op.done():
-                            logger.debug("Waiting on batch {}".format(id))
-                            time.sleep(3)
-                        logger.debug("Batch ID {} Status: {}".format(id,batch_ops[id].metadata.state))
+                    # Check if all batches are done
+                    all_done = False
+                    while not all_done:    
+                        for batch_id in batch_info:
+                            if 'operation' in batch_info[batch_id]:
+                                batch_op = batch_info[batch_id]['operation']
+                                if (batch_op.done() and 'done' not in batch_info[batch_id]):
+                                    batch_result = batch_op.result()
+                                    logger.debug("Batch ID {} results:\n".format(batch_id))
+                                    for posted_line,result in zip(batch_info[batch_id]['posted'],batch_result.job_results):
+                                        logger.debug("Job {}:{} for company {} creation status: {}"\
+                                            .format(batch_info[batch_id]['batch'][posted_line]['requisition_id'],\
+                                                batch_info[batch_id]['batch'][posted_line]['language_code'],\
+                                                    batch_info[batch_id]['batch'][posted_line]['company'],result.status.code))
+                                        # Job created successfully
+                                        if result.status.code == 0:
+                                            batch_info[batch_id]['batch'][posted_line]['status'] = 'SUCCESS'
+                                            cts_db.persist_to_db(result.job,project_id=project_id,tenant_id=tenant_id,\
+                                                company_id=batch_info[batch_id]['batch'][posted_line]['company'])
+                                            logger.info("Job {}:{} for company {} created."\
+                                            .format(batch_info[batch_id]['batch'][posted_line]['requisition_id'],\
+                                                batch_info[batch_id]['batch'][posted_line]['language_code'],\
+                                                    batch_info[batch_id]['batch'][posted_line]['company']))
+                                            print("Job {}:{} for company {} created."\
+                                            .format(batch_info[batch_id]['batch'][posted_line]['requisition_id'],\
+                                                batch_info[batch_id]['batch'][posted_line]['language_code'],\
+                                                    batch_info[batch_id]['batch'][posted_line]['company']))
+                                        # Handle out of sync jobs
+                                        elif result.status.code == 6:
+                                            logger.info("Job {}:{} for company {} already exists in the server and will be synced to the client."\
+                                            .format(batch_info[batch_id]['batch'][posted_line]['requisition_id'],\
+                                                batch_info[batch_id]['batch'][posted_line]['language_code'],\
+                                                    batch_info[batch_id]['batch'][posted_line]['company']))
+                                            print("Job {}:{} for company {} already exists in the server and will be synced to the client."\
+                                            .format(batch_info[batch_id]['batch'][posted_line]['requisition_id'],\
+                                                batch_info[batch_id]['batch'][posted_line]['language_code'],\
+                                                    batch_info[batch_id]['batch'][posted_line]['company']))
+                                            batch_info[batch_id]['batch'][posted_line]['status'] = 'SYNC'
+                                            if self.sync_job(project_id=project_id,tenant_id=tenant_id,\
+                                                company_id=batch_info[batch_id]['batch'][posted_line]['company'],\
+                                                    external_id=batch_info[batch_id]['batch'][posted_line]['requisition_id']):
+                                                batch_info[batch_id]['batch'][posted_line]['status'] = 'SUCCESS'
+                                                logger.info("Synced to the client.".format(result.job.requisition_id))
+                                                print("Synced to the client.".format(result.job.requisition_id))
+                                            else:
+                                                batch_info[batch_id]['batch'][posted_line]['status'] = 'SYNC_FAILED'
+                                                logger.info("Sync failed.".format(result.job.requisition_id))
+                                                print("Sync failed.".format(result.job.requisition_id))
+                                        # Handle job creation failures
+                                        else:
+                                            batch_info[batch_id]['batch'][posted_line]['status'] = 'FAILED'
+                                            batch_info[batch_id]['batch'][posted_line]['errors'].append(result.status)
+                                            logger.info("Failed to create job {}:{} for company {}."\
+                                            .format(batch_info[batch_id]['batch'][posted_line]['requisition_id'],\
+                                                batch_info[batch_id]['batch'][posted_line]['language_code'],\
+                                                    batch_info[batch_id]['batch'][posted_line]['company']))
+                                            print("Failed to create job {}:{} for company {}."\
+                                            .format(batch_info[batch_id]['batch'][posted_line]['requisition_id'],\
+                                                batch_info[batch_id]['batch'][posted_line]['language_code'],\
+                                                    batch_info[batch_id]['batch'][posted_line]['company']))
+                                    batch_info[batch_id]['done']=True
+                                else:
+                                    logger.debug("Waiting on batch {}".format(id))
+                            else:
+                                logger.warn("No jobs were posted in batch {}".format(batch_id))
+                                continue
+                        time.sleep(2)
+                        # Check which batches are done and compare if all batches have 'DONE' key
+                        done_batches = [batch_id for batch_id,batch in batch_info.items() if 'done' in batch.keys()]
+                        all_done = True if len(done_batches) == len(batch_info) else False
+                    
+                    total_jobs_created = 0
+                    total_jobs_skipped = 0
+                    total_jobs_failed = 0
+                    for batch_id,batch in batch_info.items():
+                        for line,line_item in batch['batch'].items():
+                            total_jobs_created+=1 if line_item['status']=='SUCCESS' else 0
+                            total_jobs_skipped+=1 if line_item['status']=='SKIPPED' else 0
+                            total_jobs_failed+=1 if line_item['status']=='FAILED' else 0
 
+                            if line_item['status'] != 'SUCCESS':
+                                print("Line {}:\nJob{}:{} for company {} {}\nErrors: {}".format(line, \
+                                    line_item['requisition_id'],line_item['language_code'],line_item['company'],\
+                                        line_item['status'],line_item['errors']))
                     print("Total Jobs created: {}".format(total_jobs_created))
+                    print("Total Jobs skipped: {}".format(total_jobs_skipped))
+                    print("Total Jobs failed: {}".format(total_jobs_failed))
                     #Check all the batches for errors: batch_errors = {batch_id:errors[]}
-                    for errors in batch_errors.values():
-                        if errors:
-                            raise Exception(batch_errors)
-                            return None
                     return True
                 else:
                     raise FileNotFoundError("Missing input file.")
@@ -253,7 +320,8 @@ class Job():
                     logger.debug("Existing job? {}".format(existing_jobs))
             else:
                 # If job external_id (requisition_id) is not provided, bulk delete
-                existing_jobs = self.get_job(project_id=project_id,company_id=company_id,tenant_id=tenant_id,all=True,scope='limited')
+                logger.debug("Calling get_job({},{},{},{},{})".format(project_id,tenant_id,company_id,all,'full' if force else 'limited'))
+                existing_jobs = self.get_job(project_id=project_id,company_id=company_id,tenant_id=tenant_id,all=True,scope='full' if force else 'limited')
 
             if existing_jobs:
                 confirmation = cts_helper.user_confirm("{} job(s) from {} will be deleted in {} tenant. Confirm (y/n/Enter):"\
@@ -263,11 +331,11 @@ class Job():
                     deleted = 0
                     for job in existing_jobs:
                         try:
-                            logger.info("Deleting job id {}: {} for company {}".format(job.requisition_id,job.language_code, job.companyDisplayName))
+                            logger.info("Deleting job id {}: {} for company {}({})...".format(job.requisition_id,job.language_code, job.company_display_name,job.company))
                             client.delete_job(job.name)
                             db.execute("DELETE FROM job where job_name = ?",(job.name,))
-                            logger.info("Job {}:{} deleted for company {}.".format(job.requisition_id,job.language_code,job.companyDisplayName))
-                            print("Job {}:{} deleted for company {}.".format(job.requisition_id,job.language_code,job.companyDisplayName))
+                            logger.info("Deleted.".format(job.requisition_id,job.language_code,job.company_display_name))
+                            print("Job {}:{} deleted for company {}({}).".format(job.requisition_id,job.language_code,job.company_display_name,job.company))
                             deleted += 1
                             print("Deleted {} of {} jobs".format(deleted,len(existing_jobs)))
                         except GoogleAPICallError as e:
@@ -281,7 +349,12 @@ class Job():
                 else:
                     print ("Aborted.")
             else:
-                logger.warning("Job {} for company {} does not exist.".format(external_id,company_id))
+                logger.warning("No {}{}{} {} for {} in the {} tenant.".format("job id" if external_id else "jobs",\
+                    external_id or "",":"+languages if external_id else "",'exists' if external_id else 'exist', \
+                        company_id or "any companies",tenant_id or 'default'))
+                print("No {}{}{} {} for {} in the {} tenant.".format("job id" if external_id else "jobs",\
+                    external_id or "",":"+languages if external_id else "",'exists' if external_id else 'exist', \
+                        company_id or "any companies",tenant_id or 'default'))
                 return None
 
         except ValueError:
@@ -444,5 +517,111 @@ class Job():
                     external_id,e),exc_info=config.LOGGING['traceback'])
             else:
                 logger.error("Error getting job for project {} company {}. Message: {}".format(
+                project_id,company_id,e),exc_info=config.LOGGING['traceback'])
+            raise 
+    
+    def sync_job(self,project_id,tenant_id=None,company_id=None,external_id=None):
+        """ 
+        Sync a job or a batch of jobs for a company from the server to the client.
+        """
+        logger.debug("CALLED: sync_job({},{},{} by {})".format(project_id,tenant_id,external_id,\
+            inspect.currentframe().f_back.f_code.co_name))
+        try:
+            client = self.client()    
+
+            if project_id is not None:
+                job_key = project_id
+            else:
+                logging.error("Missing arguments: project_id.",exc_info=config.LOGGING['traceback'])
+                raise ValueError
+
+            # Look up parent resource path for listing
+            if tenant_id:
+                tenant = cts_tenant.Tenant()
+                tenant_obj = tenant.get_tenant(project_id,tenant_id,scope='limited')
+                logger.debug("Tenant set to:\n {}".format(tenant_obj))
+                if tenant_obj is None:
+                    logger.error("Unknown tenant: {}".format(tenant_id))
+                    exit(1)
+                parent = tenant_obj.name
+            else:
+                parent = client.project_path(project_id)
+            logger.debug("Parent path: {}".format(parent))
+
+            #Default filter
+            # Add status to the filter object
+            state_filter = "status = \"OPEN\""
+
+            # Add the requisition ID for filtering
+            if external_id:
+                if company_id:
+                    req_filter = " AND requisitionId = \"{}\"".format(external_id)
+                else:
+                    logger.error("Invalid arguments. Missing mandatory company id for job {}.".format(external_id)\
+                        ,config.LOGGING['traceback'])
+                    raise ValueError
+                    exit(1)
+
+
+            # Look up company resource path for filtering
+            if company_id:
+                companies = cts_company.Company().get_company(project_id=project_id,tenant_id=tenant_id,external_id=company_id,scope='limited')
+                logger.debug("Company retrieved:\n {}".format(companies))
+            else:
+                # this will be looping over all companies now
+                logger.info("Sync jobs for all companies in the {} tenant...".format(tenant_id or "default"))
+                print("Sync jobs for all companies in the {} tenant...".format(tenant_id or "default"))
+                companies = cts_company.Company().get_company(project_id=project_id,tenant_id=tenant_id,all=True,scope='limited')
+                logger.debug("Companies retrieved:\n {}".format(companies))
+                print([company.external_id for company in companies])
+            if companies:
+                synced_jobs = 0           
+                for company in companies:
+                    # Sync jobs company by company for all companies
+                    company_filter = " AND companyName = \"{}\"".format(company.name)
+                    company_id = company.external_id
+
+                    filter_ = state_filter + company_filter + (req_filter if external_id else "")
+                    # List by company ID with full scope --> Query CTS to get the full job objects with company filter
+                    logger.debug ("Retrieving all jobs for company {} from {} tenant, filtered by: \n{}".format(company_id,\
+                        tenant_id or 'default',filter_))
+                    lookedup_jobs = [t for t in client.list_jobs(parent,filter_)]
+                    logger.debug("Retreived job count: {}".format(len(lookedup_jobs)))
+
+                    # Check if the retrieved jobs exist in the database (i.e. scope = limited) and persist if not found
+                    for job in lookedup_jobs:
+                        if not self.get_job(project_id=project_id,company_id=company_id,tenant_id=tenant_id,external_id=job.requisition_id,\
+                            languages=job.language_code,scope='limited'):
+                            if cts_db.persist_to_db(job,project_id=project_id,tenant_id=tenant_id,company_id=company_id):
+                                logger.info("Synced job {}:{} for company {} in {} tenant.".format(job.requisition_id,job.language_code,\
+                                    company_id,tenant_id))
+                                print("Synced job {}:{} for company {} in {} tenant.".format(job.requisition_id,job.language_code,\
+                                    company_id,tenant_id))
+                                synced_jobs += 1
+                            else:
+                                print("Sync failed for job {}:{} for company {} in {} tenant.".format(job.requisition_id,job.language_code,\
+                                    company_id,tenant_id))
+                        else:
+                            logger.info("Job {}:{} for company {} already exists in {} tenant.".format(job.requisition_id,job.language_code,\
+                                    company_id,tenant_id))
+                            print("Job {}:{} for company {} already exists in {} tenant.".format(job.requisition_id,job.language_code,\
+                                    company_id,tenant_id))
+                if synced_jobs > 0:
+                    logger.info("Synced {} jobs.".format(synced_jobs))
+                    print("Synced {} jobs.".format(synced_jobs))
+                else:
+                    logger.info("Nothing to sync.")
+                    print("Nothing to sync.")                    
+                return True
+            else:
+                logger.error("No companies found in the {} tenant. Companies need to be created/synced before \
+                    jobs can be synced.".format(tenant_id))
+
+        except Exception as e:
+            if external_id is not None:
+                logger.error("Error syncing job by id {}. Message: {}".format(\
+                    external_id,e),exc_info=config.LOGGING['traceback'])
+            else:
+                logger.error("Error syncing job for project {} company {}. Message: {}".format(
                 project_id,company_id,e),exc_info=config.LOGGING['traceback'])
             raise 

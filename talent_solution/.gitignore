@@ -1,9 +1,9 @@
 __pycache__
 .DS_store
 install
-res/secrets
+res/secrets/*.json
 test/data
 .vscode
 *.code-workspace
 *.db
-*config.py
+config.py

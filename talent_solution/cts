@@ -58,6 +58,10 @@ class cts_cli:
         #Tenant List Parser
         parser_tenant_list = subparsers_tenant.add_parser("list",help="List all CTS tenants in a project.")
         parser_tenant_list.add_argument("--project_id",help="Project id of the CTS instance.",default=config.APP['gcp_project'])
+        # Tenant Sync Parser
+        parser_tenant_sync = subparsers_tenant.add_parser("sync",help="Sync details of a CTS tenant or all CTS tenants to the local client.")
+        parser_tenant_sync.add_argument("--project_id",help="Project id of the CTS instance.",default=config.APP['gcp_project'])
+        parser_tenant_sync.add_argument("--external_id",help="Unique human-friendly, external name of the tenant.")
 
         # Company Parser
         subparsers_company = parser_company.add_subparsers(dest="operation",help="Company operations.")
@@ -90,6 +94,13 @@ class cts_cli:
         parser_company_list = subparsers_company.add_parser("list",help="List all CTS companies in a tenant.")
         parser_company_list.add_argument("--project_id",help="Project id of the CTS instance.",default=config.APP['gcp_project'])
         parser_company_list.add_argument("--tenant_id",help="Unique human-friendly, external id of the tenant.")
+        # Company Sync Parser
+        parser_company_sync = subparsers_company.add_parser("sync",help="Show details of a CTS company.")
+        parser_company_sync.add_argument("--project_id",help="Project id of the CTS instance.",default=config.APP['gcp_project'])
+        parser_company_sync.add_argument("--tenant_id",help="Unique human-friendly, external id of the tenant. \
+            If not provided, this will be created under default tenant.")
+        parser_company_sync.add_argument("--external_id",help="Unique human-friendly, external name of the company. Supports multiple company external ids separated by comma.")
+
 
         # Job Parser
         subparsers_job = parser_job.add_subparsers(dest="operation",help="Job operations.")
@@ -132,13 +143,20 @@ class cts_cli:
                 can be provided as a comma separated list. Default: App default or 'en-US'.",default=config.APP['default_language'] or 'en-US')
 
         #Job List Parser
-        parser_job_list = subparsers_job.add_parser("list",help="List all CTS companies in a tenant.")
+        parser_job_list = subparsers_job.add_parser("list",help="List all CTS jobs for a given tenant or the default tenant.")
         parser_job_list.add_argument("--project_id",help="Project id of the CTS instance.",default=config.APP['gcp_project'])
         parser_job_list.add_argument("--tenant_id",help="Unique human-friendly, external id of the tenant.")
         parser_job_list.add_argument("--company_id",help="Unique human-friendly, external id of the company.")
         parser_job_list.add_argument("--status",help="Status of the job listing. Valid values: OPEN, EXPIRED, ALL. \
             Default: OPEN.",choices=['OPEN','EXPIRED','ALL'],default='OPEN')
 
+        #Job Sync Parser
+        parser_job_sync = subparsers_job.add_parser("sync",help="Sync all CTS jobs for a given requisition ID, or a company, or a tenant.")
+        parser_job_sync.add_argument("--project_id",help="Project id of the CTS instance.",default=config.APP['gcp_project'])
+        parser_job_sync.add_argument("--tenant_id",help="Unique human-friendly, external id of the tenant.")
+        parser_job_sync.add_argument("--company_id",help="Unique human-friendly, external id of the company. Supports multiple companies as a comma list.")
+        parser_job_sync.add_argument("--external_id",help="Requisition ID of the job. If a language code is provided along with \
+            this, it will uniquely identify a job listing.")
 
         args = main_parser.parse_args()
         getattr(self,args.entity)(args)
@@ -178,6 +196,13 @@ class cts_cli:
                     else:
                         for tenant in tenants:
                             print (json_format.MessageToJson(tenant))
+            elif args.operation == 'sync':
+                if args.project_id is None or args.project_id == "":
+                    raise ValueError("Misconfigured or missing project ID.") 
+                    exit(1)
+                else:
+                    tenant.sync_tenant(args.project_id,args.external_id)
+
         except Exception as e:
             logger.error(e,exc_info=config.LOGGING['traceback'])
 
@@ -234,7 +259,14 @@ class cts_cli:
                     else:
                         for company in companies:
                             print("\n{}".format(json_format.MessageToJson(company)))
-                        print("Total companies returned: {}".format(len(companies)))                      
+                        print("Total companies returned: {}".format(len(companies)))
+            elif args.operation == 'sync':
+                if args.project_id is None or args.project_id == "":
+                    raise ValueError("Misconfigured or missing project ID.") 
+                    exit(1)
+                else:
+                    company.sync_company(project_id=args.project_id,tenant_id=args.tenant_id,external_id=args.external_id)
+
         except Exception as e:
             logging.exception(e)
 
@@ -269,21 +301,31 @@ class cts_cli:
                     exit(1)
                 else:
                     existing_job = job.get_job(project_id=args.project_id,tenant_id=args.tenant_id,company_id=args.company_id,external_id=args.external_id,languages=args.language)
-                    print ("{}".format(existing_job)) if existing_job is not None else logger.warning("Job {} not found."  \
-                        .format(args.external_id))
+                    if existing_job:
+                        print ("{}".format(existing_job)) 
+                    else:
+                        print("Job {} not found.".format(args.external_id))
+                        logger.warning("Job {} not found.".format(args.external_id))
             elif args.operation == 'list':
                 if args.project_id is None or args.project_id == "":
                     raise ValueError("Misconfigured or missing project ID.") 
                     exit(1)
                 else:
                     jobs = job.get_job(project_id=args.project_id,tenant_id=args.tenant_id,company_id=args.company_id,status=args.status,all=True)
-                    if len(jobs) == 0:
-                        print ("No jobs found for project {} and company {}.".format(args.project_id,args.company_id)) if args.tenant_id is None   \
-                            else print ("No jobs found in project {}, tenant {} and company {}.".format(args.project_id,args.tenant_id,args.company_id))
+                    # if len(jobs) == 0:
+                    if not jobs:
+                        print ("No jobs found for project {}, {} tenant and {} company.".format(args.project_id,args.tenant_id or 'DEFAULT',args.company_id or 'any')) 
                     else:
                         for job in jobs:
                             print("\n{}".format(json_format.MessageToJson(job)))
                         print("Total jobs returned: {}".format(len(jobs)))
+            elif args.operation == 'sync':
+                if args.project_id is None or args.project_id == "":
+                    raise ValueError("Misconfigured or missing project ID.") 
+                    exit(1)
+                else:
+                    job.sync_job(project_id=args.project_id,company_id=args.company_id,tenant_id=args.tenant_id,\
+                        external_id=args.external_id)
         except Exception as e:
             logging.exception(e)
 

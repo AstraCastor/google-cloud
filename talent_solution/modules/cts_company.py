@@ -20,9 +20,15 @@ logger = logging.getLogger()
 class Company:
     
     def client(self):
-        credential_file = config.APP['secret_key']
-        logger.debug("credentials: {}".format(credential_file))
-        _company_client = talent_v4beta1.CompanyServiceClient.from_service_account_file(credential_file)
+        if 'secret_key' in config.APP:
+            if os.path.exists(config.APP['secret_key']):
+                _company_client = talent_v4beta1.CompanyServiceClient\
+                    .from_service_account_file(config.APP['secret_key'])
+                logger.debug("credentials: {}".format(config.APP['secret_key']))
+            else:
+                raise Exception("Missing credential file.")
+        else:
+            _company_client = talent_v4beta1.CompanyServiceClient()
         logger.debug("Company client created: {}".format(_company_client))
         return _company_client
     
@@ -40,8 +46,8 @@ class Company:
             for c in companies:
                 try:
                     if file:
-                        line,company_batch_item = c[0].popitem()
-                        company_object = company_batch_item.pop()
+                        batch,company_batch_item = c[0].popitem()
+                        line,company_object = company_batch_item.popitem()
                         logger.info("Creating company from line {}...".format(line))
                     else:
                         company_object = c
@@ -79,20 +85,23 @@ class Company:
                             raise("Error when persisting company {} to DB.".format(new_company.external_id))
                     else:
                         logger.warning("Company {} already exists.\n{}".format(external_id,existing_company))
-                        # return None
+                        print("Company {} already exists.\n{}".format(external_id,existing_company))
                 except AlreadyExists as e:                    
                     logger.warning("Company {} exists in server. Creating local record..".format(company_object))
+                    print("Company {} exists in server. Creating local record..".format(company_object))
                     # Sync with DB if it doesn't exist in DB
                     logger.warning("Local DB out of sync. Syncing local db..")
+                    print("Local DB out of sync. Syncing local db..")
                     sync_company = CTS_Company()
                     sync_company.name = re.search("^Company (.*) already exists.*$",e.message).group(1)
                     sync_company.external_id = company_object['external_id']
                     if cts_db.persist_to_db(sync_company,project_id=project_id,tenant_id=tenant_id):
                         logger.warning("Company {} record synced to DB.".format(external_id))                        
+                        print("Company {} record synced to DB.".format(external_id))                        
                     else:
                         raise Exception("Error when syncing company {} to DB.".format(sync_company.external_id))
                 except Exception as e:
-                    logger.error("Company creation failed.")
+                    logger.error("Company creation failed due to {}.".format(e))
                     company_errors.append(e)
             if company_errors:
                 raise Exception(company_errors)
@@ -221,22 +230,42 @@ class Company:
                 if len(company_ids)!=len(lookedup_companies):
                     lookedup_ids = [lc.external_id for lc in lookedup_companies]
                     logger.warning("Missing or unknown company ID(s): {}".format(set(company_ids) - set(lookedup_ids)))
+                    print("Missing or unknown company ID(s): {}".format(set(company_ids) - set(lookedup_ids)))
 
             # It's a list all operation
             elif all:
-                if tenant_id is not None:
-                    tenant = cts_tenant.Tenant()
-                    tenant_obj = tenant.get_tenant(project_id,tenant_id,scope='limited')
-                    logger.debug("Tenant retrieved:\n{}".format(tenant_obj))
-                    if tenant_obj is None:
-                        logger.error("Unknown Tenant: {}".format(tenant_id))
-                        exit(1)
-                    parent = tenant_obj.name
+                if scope == 'full':
+                    if tenant_id is not None:
+                        tenant = cts_tenant.Tenant()
+                        tenant_obj = tenant.get_tenant(project_id,tenant_id,scope='limited')
+                        logger.debug("Tenant retrieved:\n{}".format(tenant_obj))
+                        if tenant_obj is None:
+                            logger.error("Unknown Tenant: {}".format(tenant_id))
+                            exit(1)
+                        parent = tenant_obj.name
+                    else:
+                        parent = client.project_path(project_id)
+                    logger.debug("Parent path: {}".format(parent))
+                    lookedup_companies = [t for t in client.list_companies(parent)]
+                    logger.debug("Company list operation: {} companies returned".format(len(lookedup_companies)))
                 else:
-                    parent = client.project_path(project_id)
-                logger.debug("Parent path: {}".format(parent))
-                lookedup_companies = [t for t in client.list_companies(parent)]
-                logger.debug("Company list operation: {} companies returned".format(len(lookedup_companies)))
+                    # Lookup companies in the DB
+                    db.execute("SELECT distinct external_id,company_name FROM company where company_key like (?)",\
+                        (project_id+"-"+(tenant_id or "")+"%",))
+                    rows = db.fetchall()
+                    if rows == []:
+                        return None
+                    else:
+                        logger.debug("Companies in db:{}".format(len(rows)))
+                        lookedup_companies = []
+                        if scope == 'limited':
+                            #Return limited data looked up from the DB
+                            for row in rows:
+                                limited_company = CTS_Company()
+                                limited_company.name = row[1]
+                                limited_company.external_id = row[0]
+                                lookedup_companies.append(limited_company)
+                            logger.debug("Company show operation - scope limited: {}".format(lookedup_companies))                 
             else:
                 logger.error("Invalid arguments.",exc_info=config.LOGGING['traceback'])
                 raise AttributeError
@@ -244,6 +273,81 @@ class Company:
         except Exception as e:
             logger.error("Error getting company by name {}. Message: {}".format(external_id,e),exc_info=config.LOGGING['traceback'])
             raise 
+
+    def sync_company(self,project_id,tenant_id=None,external_id=None):
+        """ 
+        Sync a company or all companies from the server to the client.
+        """
+        logger.debug("CALLED: sync_job({},{},{} by {})".format(project_id,tenant_id,external_id,\
+            inspect.currentframe().f_back.f_code.co_name))
+        try:
+            client = self.client()    
+
+            if project_id is not None:
+                job_key = project_id
+            else:
+                logging.error("Missing arguments: project_id.",exc_info=config.LOGGING['traceback'])
+                raise ValueError
+
+            # Look up parent resource path for listing
+            if tenant_id:
+                tenant = cts_tenant.Tenant()
+                tenant_obj = tenant.get_tenant(project_id,tenant_id,scope='limited')
+                logger.debug("Tenant set to:\n {}".format(tenant_obj))
+                if tenant_obj is None:
+                    logger.error("Unknown tenant: {}".format(tenant_id))
+                    exit(1)
+                parent = tenant_obj.name
+            else:
+                parent = client.project_path(project_id)
+            logger.debug("Parent path: {}".format(parent))
+
+            all_companies = self.get_company(project_id=project_id,tenant_id=tenant_id,all=True,scope='full')
+            if all_companies:
+                # Look up company resource path for filtering
+                if external_id:
+                    logger.info("Syncing {} in the {} tenant to local...".format(external_id, tenant_id or "default"))
+                    print("Syncing {} in the {} tenant to local...".format(external_id, tenant_id or "default"))
+                    all_companies = [company for company in all_companies if external_id == company.external_id]
+                else:
+                    # this will be looping over all companies now
+                    logger.info("Syncing all companies in the {} tenant to local...".format(tenant_id or "default"))
+                    print("Sync all companies in the {} tenant to local...".format(tenant_id or "default"))
+
+                if len(all_companies) < 10:
+                    logger.debug("Companies retrieved:\n {}".format(all_companies))
+                    print([company.external_id for company in all_companies])
+                else:
+                    logger.debug("Companies retrieved:\n {}".format(len(all_companies)))
+                    print(len(all_companies))
+
+                existing_companies = self.get_company(project_id=project_id,tenant_id=tenant_id,all=True,scope='limited')
+                existing_company_names = [company.name for company in existing_companies] if existing_companies else []
+                companies_to_sync = [company for company in all_companies if company.name not in existing_company_names] \
+                    if existing_companies else all_companies
+                for company in companies_to_sync:
+                    if cts_db.persist_to_db(object=company,project_id=project_id,tenant_id=tenant_id):
+                        logger.info("Synced company {} to local.".format(company.external_id))
+                        print("Synced company {} to local.".format(company.external_id))
+                    else:
+                        logger.warning("Synced company {} to local failed.".format(company.external_id))
+                        print("Synced company {} to local failed.".format(company.external_id))
+                if len(companies_to_sync) > 0:
+                    logger.info("Total synced companies: {}".format(len(companies_to_sync)))
+                    print("Total synced companies: {}.".format(len(companies_to_sync)))
+                else:
+                    logger.info("Nothing to sync.")
+                    print("Nothing to sync.")                    
+                
+                return True
+            else:
+                logger.warning("No companies found in the {} tenant.".format(tenant_id))
+                print("No companies found in the {} tenant.".format(tenant_id))
+
+        except Exception as e: 
+            logger.error("Error syncing {}{}. Message: {}".format("company" if external_id else "",\
+                " " + external_id or "all companies.",e),exc_info=config.LOGGING['traceback'])
+            raise    
 
 if __name__ == '__main__':
     Company()

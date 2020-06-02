@@ -18,9 +18,15 @@ class Tenant:
    
     def client(self):
         try:
-            credential_file = config.APP['secret_key']
-            logger.debug("credentials: {}".format(credential_file))
-            _tenant_client = talent_v4beta1.TenantServiceClient.from_service_account_file(credential_file)
+            if 'secret_key' in config.APP:
+                if os.path.exists(config.APP['secret_key']):
+                    _tenant_client = talent_v4beta1.TenantServiceClient\
+                        .from_service_account_file(config.APP['secret_key'])
+                    logger.debug("credentials: {}".format(config.APP['secret_key']))
+                else:
+                    raise Exception("Missing credential file.")
+            else:
+                _tenant_client = talent_v4beta1.TenantServiceClient()
             logger.debug("Tenant client created: {}".format(_tenant_client))
             return _tenant_client
         except Exception as e:
@@ -53,15 +59,29 @@ class Tenant:
                 else:
                     logger.debug("db lookup:{}".format(rows))
                     if scope=='limited':
-                        tenant = CTS_Tenant()
-                        tenant.external_id = rows[0][0]
-                        tenant.name = rows[0][1]
+                        tenants = CTS_Tenant()
+                        tenants.external_id = rows[0][0]
+                        tenants.name = rows[0][1]
                     else:
-                        tenant = client.get_tenant(rows[0][1])
+                        tenants = client.get_tenant(rows[0][1])
             elif all:
-                parent = client.project_path(project_id)
-                tenant = [t for t in client.list_tenants(parent)]
-            return tenant       
+                tenants = []
+                if scope == 'limited':
+                    db.execute("SELECT distinct external_id,tenant_name,project_id FROM tenant where tenant_key like (?)",(project_id+"%",))
+                    rows = db.fetchall()
+                    if rows == []:
+                        return None
+                    else:
+                        logger.debug("db lookup:{}".format(rows))
+                        for row in rows:
+                            tenant = CTS_Tenant()
+                            tenant.external_id = row[0]
+                            tenant.name = row[1]
+                            tenants.append(tenant)
+                else:
+                    parent = client.project_path(project_id)
+                    tenants = [t for t in client.list_tenants(parent)]
+            return tenants       
         except Exception as e:
             logger.error("Error getting tenant by name {}. Message: {}".format(external_id,e),exc_info=config.LOGGING['traceback'])
             raise        
@@ -95,13 +115,16 @@ class Tenant:
 
         except AlreadyExists as e:                    
             logger.warning("Tenant {} exists in server. Creating local record..".format(external_id))
+            print("Tenant {} exists in server. Creating local record..".format(external_id))
             # Sync with DB if it doesn't exist in DB
             logger.warning("Local DB out of sync. Syncing local db..")
+            print("Local DB out of sync. Syncing local db..")
             sync_tenant = CTS_Tenant()
             sync_tenant.name = re.search("^Tenant (.*) already exists.*$",e.message).group(1)
             sync_tenant.external_id = external_id
             if cts_db.persist_to_db(sync_tenant,project_id=project_id):
                 logger.warning("Company {} record synced to DB.".format(external_id))                        
+                print("Company {} record synced to DB.".format(external_id))                        
             else:
                 raise Exception("Error when syncing tenant {} to DB.".format(sync_tenant.external_id)) 
         except Exception as e:
@@ -142,10 +165,47 @@ class Tenant:
                 exit(0)
             else:
                 logger.warning("Tenant {} does not exist.".format(external_id,existing_tenant))
+                print("Tenant {} does not exist.".format(external_id,existing_tenant))
                 return None
         except Exception as e:
             logger.error("Error deleting tenant {}: {}".format(external_id,e),exc_info=config.LOGGING['traceback'])
             raise
+
+    def sync_tenant(self,project_id,external_id=None):
+        """ Sync CTS tenant information to local DB.
+        Args:
+            project_id: project where the tenant will be created - string
+            external_id: unique ID of the tenant - string
+        Returns:
+            True - If tenants are synced successfully.
+        """
+        logger.debug("CALLED: sync_tenant({},{} by {})".format(project_id,external_id,inspect.currentframe().f_back.f_code.co_name))
+        try:
+            all_tenants = self.get_tenant(project_id=project_id,all=True,scope='full')
+            if external_id:
+                all_tenants = [tenant for tenant in all_tenants if tenant.external_id==external_id]
+
+            if all_tenants:
+                existing_tenants = self.get_tenant(project_id=project_id,all=True,scope='limited')
+                if existing_tenants:
+                    existing_tenant_names = [tenant.name for tenant in existing_tenants]
+                    tenants_to_sync = [tenant for tenant in all_tenants if tenant.name not in existing_tenant_names]
+                else:
+                    tenants_to_sync = all_tenants
+                for tenant in tenants_to_sync:
+                    if cts_db.persist_to_db(object=tenant,project_id=project_id):
+                        logger.info("Tenant {} synced to local.".format(tenant.external_id))
+                        print("Tenant {} synced to local.".format(tenant.external_id))
+                    else:
+                        logger.info("Tenant {} sync to local failed.".format(tenant))
+                        print("Tenant {} sync to local failed.".format(tenant))  
+            else:
+                logger.info("Nothing to sync.")
+                print("Nothing to sync.")
+        except Exception as e:
+            logger.error("Error syncing tenant {}: {}".format(external_id,e),exc_info=config.LOGGING['traceback'])
+            raise
+
 
     if __name__ == '__main__':
         Tenant()

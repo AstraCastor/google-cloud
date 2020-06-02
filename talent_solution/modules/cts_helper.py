@@ -4,6 +4,7 @@ import sys
 from datetime import datetime
 import json
 import re
+import collections
 
 from modules import cts_tenant,cts_company,cts_job, cts_db
 from modules.cts_errors import UnparseableJobError,UnknownCompanyError
@@ -48,26 +49,26 @@ def parse_job(project_id,tenant_id,jobs=[]):
             elif isinstance(job,dict):
                 job_batch.append(job)
             else:                
-                raise UnparseableJobError
-        
-        company_ids=list(set([job['company'] for job in job_batch]))
-        logger.debug("Looking up companies for the current job batch:\n{}".format(company_ids))
-        if company_ids is not None and "" not in company_ids:
-            company_client = cts_company.Company()
-            companies = company_client.get_company(project_id=project_id,tenant_id=tenant_id,external_id=(",").join(company_ids),scope='limited')
-            if companies is not None:
-                logger.debug("get_company returned: {}".format([c.external_id for c in companies]))
-            # Check if all companies were looked up
-                if len(company_ids)!=len(companies):
-                    companies_ids = [comp['external_id'] for comp in companies]
-                    raise UnknownCompanyError("Missing or unknown company ID(s): {}".format(company_ids - companies))
-            else:
-                raise UnknownCompanyError("Missing or unknown company ID(s): {}".format(company_ids))
-        else:
-            logger.error("Missing company ID(s) in the input jobs")
-            raise UnknownCompanyError
+                raise UnparseableJobError("Invalid input format. Job argument should be an array of strings or dicts.")
+            
+        # company_ids=list(set([job['company'] for job in job_batch]))
+        # logger.debug("Looking up companies for the current job batch:\n{}".format(company_ids))
+        # if company_ids is not None and "" not in company_ids:
+        #     company_client = cts_company.Company()
+        #     companies = company_client.get_company(project_id=project_id,tenant_id=tenant_id,external_id=(",").join(company_ids),scope='limited')
+        #     if companies is not None:
+        #         logger.debug("get_company returned: {}".format([c.external_id for c in companies]))
+        #     # Check if all companies were looked up
+        #         if len(company_ids)!=len(companies):
+        #             companies_ids = [comp['external_id'] for comp in companies]
+        #             raise UnknownCompanyError("Missing or unknown company ID(s): {}".format(company_ids - companies))
+        #     else:
+        #         raise UnknownCompanyError("Missing or unknown company ID(s): {}".format(company_ids))
+        # else:
+        #     logger.error("Missing company ID(s) in the input jobs")
+        #     raise UnknownCompanyError
 
-        
+        company_obj = cts_company.Company()        
         parsed_batch = []
         #Parse the jobs now
         for job in job_batch:
@@ -81,11 +82,11 @@ def parse_job(project_id,tenant_id,jobs=[]):
                 if "description" not in job or job['description'] is "":
                     raise UnparseableJobError("Missing job description for job requisition ID {}".format(job['requisition_id']))
                 if "company" in job:
-                    lookedup_company_name = [company.name for company in companies if job['company']==company.external_id].pop()
-                    if lookedup_company_name is None:
+                    lookedup_company = company_obj.get_company(project_id=project_id,tenant_id=tenant_id,external_id=job['company'],scope='limited')
+                    if lookedup_company is None:
                         raise UnparseableJobError("Missing company ID for job requisition ID {}".format(job['requisition_id']))
                     else:
-                        job['company'] = lookedup_company_name
+                        job['company'] = lookedup_company[0].name
                 else:
                     raise UnparseableJobError("Missing company ID for job requisition ID {}".format(job['requisition_id']))
                 if "language_code" not in job:
@@ -117,13 +118,11 @@ def parse_job(project_id,tenant_id,jobs=[]):
                         raise UnparseableJobError("Error parsing custom attribute {} for job requisition ID {}.".format(attr,job['requisition_id']))
                 parsed_batch.append(job)
             except UnparseableJobError as e:
-                errors[job]=e
-        if errors:
-            raise UnparseableJobError(errors)
+                logger.warning("Error when parsing job {}:{} for {}.".format(job['requisition_id'],job['language_code'],job['company']))
+                parsed_batch.append({"ERROR":e})
+        return parsed_batch if parsed_batch else None
     except Exception as e:
         logger.error("Error occured when parsing job string:\n {}".format(job),exc_info=config.LOGGING['traceback'])
-    else:
-        return parsed_batch
 
 
 def generate_file_batch(file,rows=5,concurrent_batches=1):
@@ -143,11 +142,11 @@ def generate_file_batch(file,rows=5,concurrent_batches=1):
         with open(file,'r') as f_handle:
             batch_id = 1
             concurrent_batch = []
-            batch = []
+            batch = collections.OrderedDict()
             for line_no,line in enumerate(f_handle,1):
                 logger.debug("Reading line # {} and adding to batch {} at {}".format(line_no,batch_id,len(batch)) )
-                batch.append(line)
-                if len(batch) == rows:
+                batch[line_no]=line
+                if len(batch.keys()) == rows:
                     concurrent_batch.append({batch_id:batch})
                     logger.debug("Concurrent batch of size {}".format(len(concurrent_batch)))
                     if len(concurrent_batch) == concurrent_batches:
