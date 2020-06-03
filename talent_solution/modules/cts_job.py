@@ -114,7 +114,7 @@ class Job():
                         for batch in concurrent_batch:
                             try:
                                 for batch_id,jobs in batch.items():
-                                    batch_info.update({batch_id:{"batch":{}}})
+                                    batch_info.update({batch_id:{"batch":{},"operation":"","posted":"","done":False,"error":""}})
                                     # Check each job in the batch exists already and remove it from the batch
                                     parsed_jobs = collections.OrderedDict()
                                     for line,job in jobs.items():
@@ -125,7 +125,7 @@ class Job():
                                             external_id = job_json['requisition_id']
                                             language=job_json['language_code']
                                             batch_info[batch_id]['batch'].update({line:{"company":company_id,"requisition_id":external_id,\
-                                                "language_code":language}})
+                                                "language_code":language,"status":"READ","errors":[]}})
                                         except (AttributeError,json.JSONDecodeError) as e:
                                             batch_info[batch_id]['batch'].update({line:{'status':'ERROR','errors':[]}})
                                             batch_info[batch_id]['batch'][line]['errors'].append(e)
@@ -147,9 +147,9 @@ class Job():
                                                 language,company_id))
                                             batch_info[batch_id]['batch'][line].update({'status':'PARSED'})
                                         else:
-                                            logger.warning("Parse job failed for job {}:{} for company {}: {}".format(external_id,\
+                                            logger.warning("Line {}: Parse job failed for job {}:{} for company {}: {}".format(line, external_id,\
                                                 language,company_id,parsed_job[0]))
-                                            print("Parse job failed for job {}:{} for company {}: {}".format(external_id,\
+                                            print("Line {}: Parse job failed for job {}:{} for company {}: {}".format(line,external_id,\
                                                 language,company_id,parsed_job[0]))                                            
                                             batch_info[batch_id]['batch'][line].update({'status':'PARSE_FAILED','errors':[]})
                                             batch_info[batch_id]['batch'][line]['errors'].append(parsed_job[0])
@@ -187,7 +187,7 @@ class Job():
                         for batch_id in batch_info:
                             if 'operation' in batch_info[batch_id]:
                                 batch_op = batch_info[batch_id]['operation']
-                                if (batch_op.done() and 'done' not in batch_info[batch_id]):
+                                if (batch_op.done() and not batch_info[batch_id]['done']):
                                     batch_result = batch_op.result()
                                     logger.debug("Batch ID {} results:\n".format(batch_id))
                                     for posted_line,result in zip(batch_info[batch_id]['posted'],batch_result.job_results):
@@ -249,7 +249,7 @@ class Job():
                                 continue
                         time.sleep(2)
                         # Check which batches are done and compare if all batches have 'DONE' key
-                        done_batches = [batch_id for batch_id,batch in batch_info.items() if 'done' in batch.keys()]
+                        done_batches = [batch_id for batch_id,batch in batch_info.items() if batch['done']]
                         all_done = True if len(done_batches) == len(batch_info) else False
                     
                     total_jobs_created = 0
@@ -262,7 +262,7 @@ class Job():
                             total_jobs_failed+=1 if line_item['status']=='FAILED' else 0
 
                             if line_item['status'] != 'SUCCESS':
-                                print("Line {}:\nJob{}:{} for company {} {}\nErrors: {}".format(line, \
+                                print("Line {}:\nJob {}:{} for company {} {}\nErrors: {}".format(line, \
                                     line_item['requisition_id'],line_item['language_code'],line_item['company'],\
                                         line_item['status'],line_item['errors']))
                     print("Total Jobs created: {}".format(total_jobs_created))
