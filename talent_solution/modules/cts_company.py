@@ -74,7 +74,7 @@ class Company:
                             else:
                                 return new_company
                         else:
-                            raise("Line {}: Error when persisting company {} to DB.".format(line,new_company.external_id))
+                            raise Exception("Line {}: Error when persisting company {} to DB.".format(line,new_company.external_id))
                     else:
                         logger.warning("Line {}: company {} already exists.\n{}".format(line,external_id,existing_company))
                         print("Line {}: company {} already exists.\n{}".format(line,external_id,existing_company))
