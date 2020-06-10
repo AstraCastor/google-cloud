@@ -97,17 +97,17 @@ class Company:
 
             client = self.client()
             if not file:
-                company_batches = {1:{1:company}}
+                company_batches = [{1:{1:company}}]
             else:
                 # company_batches = cts_helper.generate_file_batch(file=file,rows=1)
-                company_batches = cts_helper.generate_file_batch(file=file,rows=10,concurrent_batches=10)
+                company_batches = cts_helper.generate_file_batch(file=file,rows=config.BATCH_PROCESS['batch_size'],concurrent_batches=config.BATCH_PROCESS['concurrent_batches'])
             company_errors = []
             new_companies = []
             create_company_tasks = {}
             for c_batches in company_batches:
                 for batch_id,batch in c_batches.items():
                     try:
-                        with concurrent.futures.ThreadPoolExecutor(max_workers = 10) as executor:
+                        with concurrent.futures.ThreadPoolExecutor(max_workers = config.BATCH_PROCESS['concurrent_batches']) as executor:
                             # batch_id,batch = c_batch.popitem()
                             for line,company_object in batch.items():
                                 if isinstance(company_object,str):
