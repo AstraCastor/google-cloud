@@ -4,7 +4,7 @@ import sys
 from datetime import datetime
 import json
 import re
-import collections
+from collections import OrderedDict
 
 from modules import cts_tenant,cts_company,cts_job, cts_db
 from modules.cts_errors import UnparseableJobError,UnknownCompanyError
@@ -136,18 +136,18 @@ def generate_file_batch(file,rows=5,concurrent_batches=1):
         like batched HTTP requests or multi threading/processing.\n
 
     Returns:
-    A generator object that returns a list of dict of structure [{batch id:[batch]}]. 
+    A generator object that returns an OrderedDict of structure {batch id:{line_no:line}}. 
     """
     if os.path.exists(file):
         with open(file,'r') as f_handle:
             batch_id = 1
-            concurrent_batch = []
-            batch = collections.OrderedDict()
+            concurrent_batch = OrderedDict()
+            batch = OrderedDict()
             for line_no,line in enumerate(f_handle,1):
                 logger.debug("Reading line # {} and adding to batch {} at {}".format(line_no,batch_id,len(batch)) )
                 batch[line_no]=line
                 if len(batch.keys()) == rows:
-                    concurrent_batch.append({batch_id:batch})
+                    concurrent_batch[batch_id]=OrderedDict(batch)
                     logger.debug("Concurrent batch of size {}".format(len(concurrent_batch)))
                     if len(concurrent_batch) == concurrent_batches:
                         logger.debug("Sending concurrent batch ")
@@ -155,11 +155,12 @@ def generate_file_batch(file,rows=5,concurrent_batches=1):
                         concurrent_batch.clear()
                     batch_id += 1
                     batch.clear()
-            else:
+            else: 
                 # Add the last batch
+                # This is for..else loop. Don't look for an 'if' and get confused.
                 if len(batch)>0:
                     logger.debug("Sending the last batch {}".format(batch_id))
-                    concurrent_batch.append({batch_id:batch})
+                    concurrent_batch.update({batch_id:batch})
                     yield concurrent_batch
     else:
         logger.error("Missing file {}.".format(file))

@@ -110,76 +110,74 @@ class Job():
                     batch_info = {}
                     logger.debug("Batching the file @ {} rows in {} concurrent batches to be posted".format(batch_size,conc_batches))
                     # Generate the batches to be posted
-                    for concurrent_batch in cts_helper.generate_file_batch(file=file,rows=batch_size,concurrent_batches=conc_batches):
-                        for batch in concurrent_batch:
-                            try:
-                                for batch_id,jobs in batch.items():
-                                    batch_info.update({batch_id:{"batch":{},"operation":"","posted":"","done":False,"error":""}})
-                                    # Check each job in the batch exists already and remove it from the batch
-                                    parsed_jobs = collections.OrderedDict()
-                                    for line,job in jobs.items():
-                                        batch_info[batch_id]['batch'].update({line:{}})
-                                        try:
-                                            job_json = json.loads(job)
-                                            company_id = job_json['company']
-                                            external_id = job_json['requisition_id']
-                                            language=job_json['language_code']
-                                            batch_info[batch_id]['batch'].update({line:{"company":company_id,"requisition_id":external_id,\
-                                                "language_code":language,"status":"READ","errors":[]}})
-                                        except (AttributeError,json.JSONDecodeError) as e:
-                                            batch_info[batch_id]['batch'].update({line:{'status':'ERROR','errors':[]}})
-                                            batch_info[batch_id]['batch'][line]['errors'].append(e)
-                                            continue
-                                        # Skip the already existing jobs
-                                        if self.get_job(project_id=project_id,company_id=company_id,tenant_id=tenant_id,\
-                                            external_id=external_id,languages=language,scope='limited'):
-                                            print("Skipping existing job on line {}".format(line))
-                                            batch_info[batch_id]['batch'][line].update({'status':'SKIPPED'})
-                                            batch_info[batch_id]['batch'][line].update({'errors':['Job already exists.']})
-                                            continue
-                                        
-                                        # Parse the job if it isn't a malformed or an existing job
-                                        parsed_job = cts_helper.parse_job(project_id=project_id,tenant_id=tenant_id,jobs=[job])
-                                        if parsed_job and 'ERROR' not in parsed_job[0]:
-                                            # returned parsed_job is a list, add to the parsed_jobs OrderedDict for the entire batch
-                                            parsed_jobs.update({line:parsed_job[0]})
-                                            logger.info("Job {}:{} for company {} parsed.".format(external_id,\
-                                                language,company_id))
-                                            batch_info[batch_id]['batch'][line].update({'status':'PARSED'})
-                                        else:
-                                            logger.warning("Line {}: Parse job failed for job {}:{} for company {}: {}".format(line, external_id,\
-                                                language,company_id,parsed_job[0]))
-                                            print("Line {}: Parse job failed for job {}:{} for company {}: {}".format(line,external_id,\
-                                                language,company_id,parsed_job[0]))                                            
-                                            batch_info[batch_id]['batch'][line].update({'status':'PARSE_FAILED','errors':[]})
-                                            batch_info[batch_id]['batch'][line]['errors'].append(parsed_job[0])
-                                    if parsed_jobs:
-                                        # Getting ready to post the batch: get the parent
-                                        parent = cts_helper.get_parent(project_id,tenant_id)
-                                        logger.debug("Batch {}: Parent is set to {}".format(batch_id,parent))
-                                        logger.debug("Batch {}: Posting {} jobs between lines {} to {}".format(batch_id,len(parsed_jobs),\
-                                            list(batch_info[batch_id]['batch'].keys())[0],list(batch_info[batch_id]['batch'].keys())[-1]))
-                                        print("Batch {}: Posting {} jobs between lines {} to {}".format(batch_id,len(parsed_jobs),\
-                                            list(batch_info[batch_id]['batch'].keys())[0],list(batch_info[batch_id]['batch'].keys())[-1]))
-                                        # Post the jobs
-                                        batch_info[batch_id]['operation']= client.batch_create_jobs(parent,parsed_jobs.values(),metadata=[job_req_metadata])
-                                        batch_info[batch_id]['posted'] = parsed_jobs.keys()
-                                        for posted_line in batch_info[batch_id]['posted']:
-                                            batch_info[batch_id]['batch'][posted_line]['status'] = 'POSTED'
+                    for batch in cts_helper.generate_file_batch(file=file,rows=batch_size,concurrent_batches=conc_batches):
+                        try:
+                            for batch_id,jobs in batch.items():
+                                batch_info.update({batch_id:{"batch":{},"operation":"","posted":"","done":False,"error":""}})
+                                # Check each job in the batch exists already and remove it from the batch
+                                parsed_jobs = collections.OrderedDict()
+                                for line,job in jobs.items():
+                                    batch_info[batch_id]['batch'].update({line:{}})
+                                    try:
+                                        job_json = json.loads(job)
+                                        company_id = job_json['company']
+                                        external_id = job_json['requisition_id']
+                                        language=job_json['language_code']
+                                        batch_info[batch_id]['batch'].update({line:{"company":company_id,"requisition_id":external_id,\
+                                            "language_code":language,"status":"READ","errors":[]}})
+                                    except (AttributeError,json.JSONDecodeError) as e:
+                                        batch_info[batch_id]['batch'].update({line:{'status':'ERROR','errors':[]}})
+                                        batch_info[batch_id]['batch'][line]['errors'].append(e)
+                                        continue
+                                    # Skip the already existing jobs
+                                    if self.get_job(project_id=project_id,company_id=company_id,tenant_id=tenant_id,\
+                                        external_id=external_id,languages=language,scope='limited'):
+                                        print("Skipping existing job on line {}".format(line))
+                                        batch_info[batch_id]['batch'][line].update({'status':'SKIPPED'})
+                                        batch_info[batch_id]['batch'][line].update({'errors':['Job already exists.']})
+                                        continue
+                                    
+                                    # Parse the job if it isn't a malformed or an existing job
+                                    parsed_job = cts_helper.parse_job(project_id=project_id,tenant_id=tenant_id,jobs=[job])
+                                    if parsed_job and 'ERROR' not in parsed_job[0]:
+                                        # returned parsed_job is a list, add to the parsed_jobs OrderedDict for the entire batch
+                                        parsed_jobs.update({line:parsed_job[0]})
+                                        logger.info("Job {}:{} for company {} parsed.".format(external_id,\
+                                            language,company_id))
+                                        batch_info[batch_id]['batch'][line].update({'status':'PARSED'})
                                     else:
-                                        logger.warning("No jobs to post in batch {}".format(batch_id))
-                                        print("No jobs to post in batch {}".format(batch_id))
-                                        batch_info[batch_id]['done']=True
-
-                            except RetryError as e:
-                                batch_info[batch_id]['done'] = True
-                                batch_info[batch_id]['error']= "API Retry failed due to {}.".format(e)
-                                logger.error("Batch {}: API Retry failed due to {}.".format(batch_id,e),\
-                                    exc_info=config.LOGGING['traceback'])
-                            except GoogleAPICallError as e:
-                                batch_info[batch_id]['error']="API Retry failed due to {}.".format(e)
-                                logger.error("Batch {}: CTS API Error due to {}".format(batch_id,e),\
-                                    exc_info=config.LOGGING['traceback'])
+                                        logger.warning("Line {}: Parse job failed for job {}:{} for company {}: {}".format(line, external_id,\
+                                            language,company_id,parsed_job[0]))
+                                        print("Line {}: Parse job failed for job {}:{} for company {}: {}".format(line,external_id,\
+                                            language,company_id,parsed_job[0]))                                            
+                                        batch_info[batch_id]['batch'][line].update({'status':'PARSE_FAILED','errors':[]})
+                                        batch_info[batch_id]['batch'][line]['errors'].append(parsed_job[0])
+                                if parsed_jobs:
+                                    # Getting ready to post the batch: get the parent
+                                    parent = cts_helper.get_parent(project_id,tenant_id)
+                                    logger.debug("Batch {}: Parent is set to {}".format(batch_id,parent))
+                                    logger.debug("Batch {}: Posting {} jobs between lines {} to {}".format(batch_id,len(parsed_jobs),\
+                                        list(batch_info[batch_id]['batch'].keys())[0],list(batch_info[batch_id]['batch'].keys())[-1]))
+                                    print("Batch {}: Posting {} jobs between lines {} to {}".format(batch_id,len(parsed_jobs),\
+                                        list(batch_info[batch_id]['batch'].keys())[0],list(batch_info[batch_id]['batch'].keys())[-1]))
+                                    # Post the jobs
+                                    batch_info[batch_id]['operation']= client.batch_create_jobs(parent,parsed_jobs.values(),metadata=[job_req_metadata])
+                                    batch_info[batch_id]['posted'] = parsed_jobs.keys()
+                                    for posted_line in batch_info[batch_id]['posted']:
+                                        batch_info[batch_id]['batch'][posted_line]['status'] = 'POSTED'
+                                else:
+                                    logger.warning("No jobs to post in batch {}".format(batch_id))
+                                    print("No jobs to post in batch {}".format(batch_id))
+                                    batch_info[batch_id]['done']=True
+                        except RetryError as e:
+                            batch_info[batch_id]['done'] = True
+                            batch_info[batch_id]['error']= "API Retry failed due to {}.".format(e)
+                            logger.error("Batch {}: API Retry failed due to {}.".format(batch_id,e),\
+                                exc_info=config.LOGGING['traceback'])
+                        except GoogleAPICallError as e:
+                            batch_info[batch_id]['error']="API Retry failed due to {}.".format(e)
+                            logger.error("Batch {}: CTS API Error due to {}".format(batch_id,e),\
+                                exc_info=config.LOGGING['traceback'])
 
                     # Check if all batches are done
                     all_done = False
@@ -401,6 +399,7 @@ class Job():
                 elif company_id:        
                     # List jobs by company ID
                     if scope=='full':
+                        print("Listing all jobs for tenant {} and company {}. This could take a while...".format())
                         # Calculate the parent path : Get tenant name if tenant ID was provided, if not default tenant under the 
                         # given project.
                         if tenant_id is not None:
@@ -447,6 +446,7 @@ class Job():
                 else:
                     # If no company_id was provided, list jobs by tenant (default or a named tenant)
                     # Note: this is not an op supported by CTS, this is implemented only as a local DB lookup followed by server lookup for full scope listings.
+                    print("Listing all jobs for tenant {}...".format(tenant_id))
                     if tenant_id is not None:
                         # Calculate the tenant_id part of the job_key to look up from the DB
                         job_key = job_key + "-" + tenant_id
