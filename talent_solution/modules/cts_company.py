@@ -8,6 +8,7 @@ import logging
 import inspect
 import re
 import json
+import concurrent.futures
 
 from modules import cts_db,cts_tenant,cts_helper
 from modules.cts_errors import UnknownCompanyError
@@ -40,24 +41,8 @@ class Company:
     def create_company(self,project_id,tenant_id=None,company=None,file=None):
         logger.debug("CALLED: create_company({},{},{},{} by {})".format(project_id,tenant_id,company,file,inspect.currentframe().f_back.f_code.co_name))
         try:
-            client = self.client()
-            if not file:
-                companies = [company]
-            else:
-                companies = cts_helper.generate_file_batch(file=file,rows=1)
-            company_errors = []
-            new_companies = []
-            for c in companies:
+            def task_create_company(line,company_object):
                 try:
-                    if file:
-                        batch,company_batch_item = c[0].popitem()
-                        line,company_object = company_batch_item.popitem()
-                        logger.info("Creating company from line {}...".format(line))
-                    else:
-                        company_object = c
-                    if isinstance(company_object,str):
-                        company_object = json.loads(company_object)
-
                     external_id = company_object['external_id']
                     # Check if it is an existing company
                     logger.debug("Calling get_company({},{})".format(project_id,external_id))
@@ -82,17 +67,20 @@ class Company:
                         new_company = client.create_company(parent,company_object)
                         if cts_db.persist_to_db(new_company,project_id=project_id,tenant_id=tenant_id):
                             new_companies.append(new_company)
-                            logger.info("Company {} created.\n{}".format(external_id,new_company))
+                            logger.info("Line {}: company {} created.{}".format(line,external_id,new_company))
                             if file:
                                 print("Line {}: company {} created.".format(line,external_id))
+                                return True
+                            else:
+                                return new_company
                         else:
-                            raise("Error when persisting company {} to DB.".format(new_company.external_id))
+                            raise("Line {}: Error when persisting company {} to DB.".format(line,new_company.external_id))
                     else:
-                        logger.warning("Company {} already exists.\n{}".format(external_id,existing_company))
-                        print("Company {} already exists.\n{}".format(external_id,existing_company))
+                        logger.warning("Line {}: company {} already exists.\n{}".format(line,external_id,existing_company))
+                        print("Line {}: company {} already exists.\n{}".format(line,external_id,existing_company))
                 except AlreadyExists as e:                    
-                    logger.warning("Company {} exists in server. Creating local record..".format(company_object))
-                    print("Company {} exists in server. Creating local record..".format(company_object))
+                    logger.warning("Line{}: company {} exists in server. Creating local record..".format(line,company_object))
+                    print("Line{}: company {} exists in server. Creating local record..".format(line,company_object))
                     # Sync with DB if it doesn't exist in DB
                     logger.warning("Local DB out of sync. Syncing local db..")
                     print("Local DB out of sync. Syncing local db..")
@@ -100,13 +88,43 @@ class Company:
                     sync_company.name = re.search("^Company (.*) already exists.*$",e.message).group(1)
                     sync_company.external_id = company_object['external_id']
                     if cts_db.persist_to_db(sync_company,project_id=project_id,tenant_id=tenant_id):
-                        logger.warning("Company {} record synced to DB.".format(external_id))                        
-                        print("Company {} record synced to DB.".format(external_id))                        
+                        logger.warning("Line {}: company {} record synced to DB.".format(line,external_id))                        
+                        print("Line {}: company {} record synced to DB.".format(line,external_id))   
+                        return True                     
                     else:
-                        raise Exception("Error when syncing company {} to DB.".format(sync_company.external_id))
-                except Exception as e:
-                    logger.error("Company creation failed due to {}.".format(e))
-                    company_errors.append(e)
+                        raise Exception("Line {}: Error when syncing company {} to DB.".format(line,sync_company.external_id))
+                        return False
+
+            client = self.client()
+            if not file:
+                company_batches = {1:{1:company}}
+            else:
+                # company_batches = cts_helper.generate_file_batch(file=file,rows=1)
+                company_batches = cts_helper.generate_file_batch(file=file,rows=10,concurrent_batches=10)
+            company_errors = []
+            new_companies = []
+            create_company_tasks = {}
+            for c_batches in company_batches:
+                for batch_id,batch in c_batches.items():
+                    try:
+                        with concurrent.futures.ThreadPoolExecutor(max_workers = 10) as executor:
+                            # batch_id,batch = c_batch.popitem()
+                            for line,company_object in batch.items():
+                                if isinstance(company_object,str):
+                                    company_object = json.loads(company_object)
+                                logger.info("Creating company from line {}...".format(line))
+                                create_company_tasks.update({executor.submit(task_create_company,line,company_object):{"external_id":company_object['external_id'],"line":line}})
+                            for task in concurrent.futures.as_completed(create_company_tasks):
+                                task_item = create_company_tasks.pop(task)
+                                result = task.result()
+                                if not result:
+                                    logger.debug("Line {}: company {} not created.".format(task_item['line'],task_item['external_id']))
+                                    print("Line {}: company {} not created.".format(task_item['line'],task_item['external_id']))
+                                elif isinstance(result,CTS_Company):
+                                        return result
+                    except Exception as e:
+                        logger.error("Company creation failed due to {}.".format(e),config.LOGGING['traceback'])
+                        company_errors.append(e)
             if company_errors:
                 raise Exception(company_errors)
         except ValueError:
@@ -239,6 +257,7 @@ class Company:
             # It's a list all operation
             elif all:
                 if scope == 'full':
+                    # Listing directly from the server
                     if tenant_id is not None:
                         tenant = cts_tenant.Tenant()
                         tenant_obj = tenant.get_tenant(project_id,tenant_id,scope='limited')
@@ -250,10 +269,11 @@ class Company:
                     else:
                         parent = client.project_path(project_id)
                     logger.debug("Parent path: {}".format(parent))
+                    print("Getting list of companies for {} tenant. This could take a while...".format(tenant_id or 'DEFAULT'))
                     lookedup_companies = [t for t in client.list_companies(parent)]
                     logger.debug("Company list operation: {} companies returned".format(len(lookedup_companies)))
                 else:
-                    # Lookup companies in the DB
+                    # Lookup companies in the DB and return a limited version of Company objects with just the IDs
                     db.execute("SELECT distinct external_id,company_name FROM company where company_key like (?)",\
                         (project_id+"-"+(tenant_id or "")+"%",))
                     rows = db.fetchall()
