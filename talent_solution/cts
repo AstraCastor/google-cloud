@@ -158,6 +158,18 @@ class cts_cli:
         parser_job_sync.add_argument("--external_id",help="Requisition ID of the job. If a language code is provided along with \
             this, it will uniquely identify a job listing.")
 
+        # Job Update Parser
+        parser_job_update = subparsers_job.add_parser("update",help="Create a CTS job.")
+        parser_job_update.add_argument("--project_id",help="Project id of the CTS instance.",default=config.APP['gcp_project'])
+        parser_job_update.add_argument("--tenant_id",help="Unique human-friendly, external id of the tenant. \
+            If not provided, this will be updated under default tenant.")
+        job_update_mutex_args = parser_job_update.add_mutually_exclusive_group(required=True)
+        job_update_mutex_args.add_argument("--job",help="Job object. Mandatory attributes: \
+            {\"company\":\"<company_id>\",\"requisition_id\":\"<external id>\",\"title\":\"<title>\",\"description\":\"<description>\",\
+                \"language_code\":\"<language_code>\"}",type=json_loads)          
+        job_update_mutex_args.add_argument("--file",help="Path to the file to be loaded in batch mode.")
+        parser_job_update.add_argument("--update_mask",help="Update mask spec: a comma-separated list of fully qualified names of fields. Example: 'user.displayName,photo'.\
+            If update_mask is provided, only the specified fields in Job are updated. Otherwise all the fields are updated.")
         args = main_parser.parse_args()
         getattr(self,args.entity)(args)
 
@@ -326,6 +338,21 @@ class cts_cli:
                 else:
                     job.sync_job(project_id=args.project_id,company_id=args.company_id,tenant_id=args.tenant_id,\
                         external_id=args.external_id)
+            elif args.operation == 'update':
+                if args.project_id is None or args.project_id == "":
+                    raise ValueError("Misconfigured or missing project ID.") 
+                    exit(1)
+                else:
+                    updated_job = job.update_job(project_id=args.project_id,tenant_id=args.tenant_id,input_job=args.job,\
+                        path=args.file,update_mask=args.update_mask)
+                    # print(updated_job)
+                    # update_job returns True for successful batch completion and the updated job object 
+                    # for interactive job creation. It will return False in case of an error
+                    if updated_job:
+                        if not isinstance(updated_job,bool):
+                            print("\n{}".format(json_format.MessageToJson(updated_job)))
+                    else:
+                        exit(1)
         except Exception as e:
             logging.exception(e)
 
