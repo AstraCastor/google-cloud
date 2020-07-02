@@ -168,8 +168,9 @@ class cts_cli:
             {\"company\":\"<company_id>\",\"requisition_id\":\"<external id>\",\"title\":\"<title>\",\"description\":\"<description>\",\
                 \"language_code\":\"<language_code>\"}",type=json_loads)          
         job_update_mutex_args.add_argument("--file",help="Path to the file to be loaded in batch mode.")
-        parser_job_update.add_argument("--update_mask",help="Update mask spec: a comma-separated list of fully qualified names of fields. Example: 'user.displayName,photo'.\
-            If update_mask is provided, only the specified fields in Job are updated. Otherwise all the fields are updated.")
+        parser_job_update.add_argument("--update_mask",help="Update mask spec: a comma-separated list of fully qualified names of fields of the Job resource. Example: 'posting_expire_time,application_info.uris'.\
+            If update_mask is provided, only the specified fields in Job are updated. Otherwise all the fields are updated, which is not recommended. \
+                Ref: https://cloud.google.com/talent-solution/job-search/docs/reference/rest/v4beta1/projects.jobs")
         args = main_parser.parse_args()
         getattr(self,args.entity)(args)
 

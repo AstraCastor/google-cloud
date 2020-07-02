@@ -328,9 +328,10 @@ class Job():
                                     batch_info[batch_key]['batch'][line]['errors'].append(e)
                                     continue
                                 # Make sure that these are already existing jobs
-                                if not self.get_job(project_id=project_id,company_id=company_id,tenant_id=tenant_id,\
-                                    external_id=external_id,languages=language,scope='limited'):
-                                    print("Skipping existing job on line {}".format(line))
+                                existing_job = self.get_job(project_id=project_id,company_id=company_id,tenant_id=tenant_id,\
+                                    external_id=external_id,languages=language,scope='limited')
+                                if not existing_job:
+                                    print("Update skipping nonexistant job on line {}".format(line))
                                     batch_info[batch_key]['batch'][line].update({'status':'SKIPPED'})
                                     batch_info[batch_key]['batch'][line].update({'errors':['Job does not exist.']})
                                     continue
@@ -339,6 +340,8 @@ class Job():
                                 # to be updated must be present. Only the mandatory fields are checked though.
                                 parsed_job = cts_helper.parse_job(project_id=project_id,tenant_id=tenant_id,jobs=[job])
                                 if parsed_job and 'ERROR' not in parsed_job[0]:
+                                    # Add the job name field from the existing job look up
+                                    parsed_job[0]['name'] = existing_job[0].name
                                     # returned parsed_job is a list, add to the parsed_jobs OrderedDict for the entire batch
                                     parsed_jobs.update({line:parsed_job[0]})
                                     logger.info("Job {}:{} for company {} parsed.".format(external_id,\
@@ -457,11 +460,11 @@ class Job():
                                             batch_info[batch_id]['batch'][posted_line]['status'] = 'SUCCESS'
                                             cts_db.persist_to_db(result.job,project_id=project_id,tenant_id=tenant_id,\
                                                 company_id=batch_info[batch_id]['batch'][posted_line]['company'])
-                                            logger.info("Job {}:{} for company {} created."\
+                                            logger.info("Job {}:{} for company {} updated."\
                                             .format(batch_info[batch_id]['batch'][posted_line]['requisition_id'],\
                                                 batch_info[batch_id]['batch'][posted_line]['language_code'],\
                                                     batch_info[batch_id]['batch'][posted_line]['company']))
-                                            print("Job {}:{} for company {} created."\
+                                            print("Job {}:{} for company {} updated."\
                                             .format(batch_info[batch_id]['batch'][posted_line]['requisition_id'],\
                                                 batch_info[batch_id]['batch'][posted_line]['language_code'],\
                                                     batch_info[batch_id]['batch'][posted_line]['company']))
@@ -629,11 +632,14 @@ class Job():
     def get_job(self,project_id,company_id,tenant_id=None,external_id=None,languages=config.APP['default_language'],status='OPEN',all=False,scope='full'):
         """ Get CTS job by name or get all CTS jobs by project.
         Args:
-            project_id: Project where the job will be created - string
+            project_id: Unique Google Cloud Project ID where the job is hosted - string
+            company_id: Unique external ID of the company that the job belongs to. - string
             external_id: Unique ID of the job - string
+            languages: List of language IDs in the IETF BCP47 notation e.g. "en-US". Default, if not configured for the application, is "en-US". \
+                Supports comma-separated multiple input values.
             all: List all jobs. Mutually exclusive with external_id - Boolean.
         Returns:
-            an instance of job or None if job was not found.
+            A list of google.cloud.talent_v4beta1.types.Job  or None if no job was not found.
         """
         logger.debug("CALLED: get_job({},{},{},{},{},{},{} by {})".format(project_id,tenant_id,external_id,languages,status,all,scope,\
             inspect.currentframe().f_back.f_code.co_name))
